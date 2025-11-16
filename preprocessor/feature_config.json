@@ -1,0 +1,10 @@
+{
+  "transformations": {
+    "Daily fluxes": "symlog",
+    "Prec": "log1p",
+    "Split N amount": "log1p",
+    "ferdur": "log1p",
+    "sowdur": "log1p",
+    "others": "standard"
+  }
+}
