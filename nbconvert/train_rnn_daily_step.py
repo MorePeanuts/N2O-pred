@@ -427,19 +427,28 @@ val_sample_indices = np.random.choice(len(val_sequences), sample_size, replace=F
 avg_features = []
 feature_names = []
 
+# Get actual feature dimensions from data
+first_seq = val_sequences[val_sample_indices[0]]
+n_static_numeric = first_seq['static_numeric'].shape[0]
+n_static_categorical = first_seq['static_categorical_encoded'].shape[0]
+n_dynamic_numeric = first_seq['dynamic_numeric'].shape[1]
+n_fert_numeric = first_seq['fertilization_numeric'].shape[1]
+n_fert_cat_fert = first_seq['fertilization_categorical_encoded']['fertilization_class'].shape[1]
+n_fert_cat_appl = first_seq['fertilization_categorical_encoded']['appl_class'].shape[1]
+
 # Static features
-static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
-static_categorical_names = ['crop_class (encoded)']
+static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N'][:n_static_numeric]
+static_categorical_names = [f'crop_class_{i} (encoded)' for i in range(n_static_categorical)]
 
 # Dynamic features (averaged across time)
-dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)']
-fert_numeric_names = ['Split N amount (avg)']
-fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(9)]
-fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(3)]
+dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)'][:n_dynamic_numeric]
+fert_numeric_names = [f'fert_numeric_{i} (avg)' for i in range(n_fert_numeric)]
+fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(n_fert_cat_fert)]
+fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(n_fert_cat_appl)]
 
 feature_names = (
     static_numeric_names
-    + static_categorical_names[:1]
+    + static_categorical_names
     + dynamic_numeric_names
     + fert_numeric_names
     + fert_cat_names_fert
@@ -454,19 +463,29 @@ for idx in val_sample_indices:
 
     # Time-averaged dynamic features (only at observed points)
     obs_mask = seq['observed_mask']
-    avg_dyn = seq['dynamic_numeric'][obs_mask].mean(axis=0)
-    avg_fert = seq['fertilization_numeric'][obs_mask].mean(axis=0)
-    avg_fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class'][
-        obs_mask
-    ].mean(axis=0)
-    avg_fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class'][obs_mask].mean(
-        axis=0
-    )
+
+    # Check if there are any observed points
+    if obs_mask.sum() > 0:
+        avg_dyn = seq['dynamic_numeric'][obs_mask].mean(axis=0)
+        avg_fert = seq['fertilization_numeric'][obs_mask].mean(axis=0).flatten()  # Ensure 1D
+        avg_fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class'][
+            obs_mask
+        ].mean(axis=0)
+        avg_fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class'][obs_mask].mean(
+            axis=0
+        )
+    else:
+        # If no observed points, use the mean of all points
+        avg_dyn = seq['dynamic_numeric'].mean(axis=0)
+        avg_fert = seq['fertilization_numeric'].mean(axis=0).flatten()
+        avg_fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class'].mean(axis=0)
+        avg_fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class'].mean(axis=0)
 
     combined = np.concatenate([static, avg_dyn, avg_fert, avg_fert_cat_fert, avg_fert_cat_appl])
     avg_features.append(combined)
 
 X_sample = np.array(avg_features)
+print(f'Total features: {len(feature_names)}, Sample shape: {X_sample.shape}')
 
 
 # Create a simplified predictor wrapper

@@ -430,8 +430,17 @@ sample_lengths = []
 
 for idx in val_sample_indices:
     seq = val_sequences[idx]
-    sample_static_features.append(seq['static_features'])
-    sample_dynamic_features.append(seq['dynamic_features'])
+    # Combine static numeric and categorical features
+    static_combined = np.concatenate([seq['static_numeric'], seq['static_categorical_encoded']])
+    sample_static_features.append(static_combined)
+
+    # Combine all dynamic features
+    dyn_feat = seq['dynamic_numeric']
+    fert_num = seq['fertilization_numeric']
+    fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class']
+    fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class']
+    dynamic_combined = np.concatenate([dyn_feat, fert_num, fert_cat_fert, fert_cat_appl], axis=1)
+    sample_dynamic_features.append(dynamic_combined)
     sample_lengths.append(seq['seq_length'])
 
 # Pad dynamic features to the same length
@@ -473,9 +482,10 @@ class RNNWrapper(nn.Module):
 
 # For simplicity, we'll compute SHAP values on the averaged features across time steps
 avg_dynamic_features = []
-for seq in val_sequences[:sample_size]:
+for idx in val_sample_indices:
+    seq = val_sequences[idx]
     avg_dyn = seq['dynamic_numeric'].mean(axis=0)
-    avg_fert = seq['fertilization_numeric'].mean(axis=0)
+    avg_fert = seq['fertilization_numeric'].mean(axis=0).flatten()  # Ensure 1D
     avg_fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class'].mean(axis=0)
     avg_fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class'].mean(axis=0)
     combined = np.concatenate([avg_dyn, avg_fert, avg_fert_cat_fert, avg_fert_cat_appl])
@@ -485,40 +495,50 @@ for seq in val_sequences[:sample_size]:
 all_features = []
 feature_names = []
 
-# Static features
-static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
-static_categorical_names = ['crop_class (encoded)']  # Simplified
+# Get actual feature dimensions from data
+first_seq = val_sequences[val_sample_indices[0]]
+n_static_numeric = first_seq['static_numeric'].shape[0]
+n_static_categorical = first_seq['static_categorical_encoded'].shape[0]
+n_dynamic_numeric = first_seq['dynamic_numeric'].shape[1]
+n_fert_numeric = first_seq['fertilization_numeric'].shape[1]
+n_fert_cat_fert = first_seq['fertilization_categorical_encoded']['fertilization_class'].shape[1]
+n_fert_cat_appl = first_seq['fertilization_categorical_encoded']['appl_class'].shape[1]
 
-# Dynamic features
-dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)']
-fert_numeric_names = ['Split N amount (avg)', 'ferdur (avg)', 'sowdur (avg)', 'time_delta (avg)']
-fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(9)]
-fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(3)]
+# Static features
+static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N'][:n_static_numeric]
+static_categorical_names = [f'crop_class_{i} (encoded)' for i in range(n_static_categorical)]
+
+# Dynamic features (averaged across time)
+dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)', 'time_delta (avg)'][:n_dynamic_numeric]
+fert_numeric_names = [f'fert_numeric_{i} (avg)' for i in range(n_fert_numeric)]
+fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(n_fert_cat_fert)]
+fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(n_fert_cat_appl)]
 
 feature_names = (
     static_numeric_names
-    + static_categorical_names[:1]
+    + static_categorical_names
     + dynamic_numeric_names
     + fert_numeric_names
     + fert_cat_names_fert
     + fert_cat_names_appl
 )
 
-for idx in range(sample_size):
+for i, idx in enumerate(val_sample_indices):
     seq = val_sequences[idx]
     static = np.concatenate([seq['static_numeric'], seq['static_categorical_encoded']])
-    combined_feat = np.concatenate([static, avg_dynamic_features[idx]])
+    combined_feat = np.concatenate([static, avg_dynamic_features[i]])
     all_features.append(combined_feat)
 
 X_sample = np.array(all_features)
+print(f'Total features: {len(feature_names)}, Sample shape: {X_sample.shape}')
 
 
 # Create a simple predictor wrapper
 class SimplifiedRNNPredictor(nn.Module):
-    def __init__(self, original_model, sample_sequences):
+    def __init__(self, original_model, sample_sequences, sample_indices):
         super().__init__()
         self.original_model = original_model
-        self.sample_sequences = sample_sequences
+        self.sample_sequences = [sample_sequences[i] for i in sample_indices]
 
     def forward(self, x_batch):
         # x_batch: (batch, features)
@@ -555,7 +575,7 @@ class SimplifiedRNNPredictor(nn.Module):
         return torch.FloatTensor(predictions).to(device)
 
 
-wrapped_model = SimplifiedRNNPredictor(model, val_sequences[:sample_size])
+wrapped_model = SimplifiedRNNPredictor(model, val_sequences, val_sample_indices)
 
 # Use KernelExplainer for model-agnostic explanation
 print('Using KernelExplainer (this may take a few minutes)...')
