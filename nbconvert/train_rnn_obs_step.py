@@ -20,6 +20,7 @@ from pathlib import Path
 from datetime import datetime
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import shap
 
 from n2o_pred.models import N2OPredictorRNN, count_parameters
 from n2o_pred.data import create_dataloader
@@ -57,13 +58,13 @@ print(f'Train: {len(train_sequences)}, Val: {len(val_sequences)}')
 
 
 BATCH_SIZE = 16
-HIDDEN_SIZE = 128
-NUM_LAYERS = 2
-DROPOUT = 0.2
+HIDDEN_SIZE = 64
+NUM_LAYERS = 1
+DROPOUT = 0.5
 RNN_TYPE = 'LSTM'
 LEARNING_RATE = 0.001
 NUM_EPOCHS = 100
-PATIENCE = 15
+PATIENCE = 20
 
 train_loader = create_dataloader(
     train_sequences, 'obs_step', BATCH_SIZE, shuffle=True, num_workers=0
@@ -324,7 +325,285 @@ predictions = {
 with open(output_dir / 'predictions.pkl', 'wb') as f:
     pickle.dump(predictions, f)
 
+# Predictions vs True Values Scatter Plot
+fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+
+# Flatten predictions and targets for scatter plots
+# Note: RNN predictions are stored per sequence, we need to flatten them
+train_preds_flat_orig = np.concatenate(
+    [
+        np.concatenate(train_targets_orig)  # This should be from train_preds_orig
+    ]
+)
+train_targets_flat_orig = np.concatenate(train_targets_orig)
+
+# Actually we need to use transformed targets for consistency in computation
+# But plot on original scale - let's inverse transform predictions
+from sklearn.preprocessing import StandardScaler
+import pickle as pkl
+
+# Load scalers to inverse transform
+with open('../preprocessor/scalers.pkl', 'rb') as f:
+    scalers = pkl.load(f)
+
+# For scatter plot, use normalized values but on original target scale
+train_preds_all_flat = np.concatenate(train_preds)
+train_targets_all_flat = np.concatenate(train_targets)
+
+
+# Inverse transform predictions (they are in normalized symlog space)
+def inverse_symlog(y):
+    return np.sign(y) * (np.exp(np.abs(y)) - 1)
+
+
+# Denormalize
+train_preds_denorm = (
+    scalers['target_obs'].inverse_transform(train_preds_all_flat.reshape(-1, 1)).flatten()
+)
+train_preds_orig_scale = inverse_symlog(train_preds_denorm)
+
+train_targets_orig_scale = np.concatenate(train_targets_orig)
+
+# Train set
+axes[0].scatter(train_targets_orig_scale, train_preds_orig_scale, alpha=0.5, s=10)
+axes[0].plot(
+    [train_targets_orig_scale.min(), train_targets_orig_scale.max()],
+    [train_targets_orig_scale.min(), train_targets_orig_scale.max()],
+    'r--',
+    lw=2,
+)
+axes[0].set_xlabel('True Daily N2O Fluxes', fontsize=11)
+axes[0].set_ylabel('Predicted Daily N2O Fluxes', fontsize=11)
+axes[0].set_title(f'Train Set (R²={train_r2:.3f})', fontsize=12)
+axes[0].grid(True, alpha=0.3)
+
+# Validation set
+val_preds_all_flat = np.concatenate(val_preds)
+val_preds_denorm = (
+    scalers['target_obs'].inverse_transform(val_preds_all_flat.reshape(-1, 1)).flatten()
+)
+val_preds_orig_scale = inverse_symlog(val_preds_denorm)
+
+val_targets_orig_scale = np.concatenate(val_targets_orig)
+
+axes[1].scatter(val_targets_orig_scale, val_preds_orig_scale, alpha=0.5, s=10)
+axes[1].plot(
+    [val_targets_orig_scale.min(), val_targets_orig_scale.max()],
+    [val_targets_orig_scale.min(), val_targets_orig_scale.max()],
+    'r--',
+    lw=2,
+)
+axes[1].set_xlabel('True Daily N2O Fluxes', fontsize=11)
+axes[1].set_ylabel('Predicted Daily N2O Fluxes', fontsize=11)
+axes[1].set_title(f'Validation Set (R²={val_r2:.3f})', fontsize=12)
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig(fig_dir / 'predictions_scatter.png', dpi=150, bbox_inches='tight')
+plt.show()
+
 print(f'\n{"=" * 60}')
 print(f'All results saved to: {output_dir}')
 print(f'{"=" * 60}')
+
+
+# ## 6. SHAP Feature Importance Analysis
+# 
+
+# In[ ]:
+
+
+print('Computing SHAP values for RNN model...')
+print('Note: For RNN models, SHAP analysis is computed on flattened time-step features')
+
+# For RNN, we need to analyze feature importance across time steps
+# We'll use GradientExplainer which works with PyTorch models
+
+# Sample a subset of validation data for SHAP
+sample_size = min(100, len(val_sequences))
+val_sample_indices = np.random.choice(len(val_sequences), sample_size, replace=False)
+
+# Collect sample data
+sample_static_features = []
+sample_dynamic_features = []
+sample_lengths = []
+
+for idx in val_sample_indices:
+    seq = val_sequences[idx]
+    sample_static_features.append(seq['static_features'])
+    sample_dynamic_features.append(seq['dynamic_features'])
+    sample_lengths.append(seq['seq_length'])
+
+# Pad dynamic features to the same length
+max_len = max(sample_lengths)
+padded_dynamic_features = []
+for dyn_feat, seq_len in zip(sample_dynamic_features, sample_lengths):
+    padded = np.zeros((max_len, dyn_feat.shape[1]))
+    padded[:seq_len] = dyn_feat
+    padded_dynamic_features.append(padded)
+
+sample_static_features = torch.FloatTensor(np.array(sample_static_features)).to(device)
+sample_dynamic_features = torch.FloatTensor(np.array(padded_dynamic_features)).to(device)
+sample_lengths_tensor = torch.LongTensor(sample_lengths)
+
+
+# Define a wrapper function for SHAP that takes flattened input
+# We'll analyze importance at the first time step as a representative
+class RNNWrapper(nn.Module):
+    def __init__(self, model, lengths):
+        super().__init__()
+        self.model = model
+        self.lengths = lengths
+
+    def forward(self, x):
+        # x shape: (batch, static_dim + dynamic_dim)
+        # Split into static and dynamic
+        static_dim = (
+            train_sequences[0]['static_numeric'].shape[0]
+            + train_sequences[0]['static_categorical_encoded'].shape[0]
+        )
+
+        static_feat = x[:, :static_dim]
+        dynamic_feat = x[:, static_dim:].unsqueeze(1)  # Add time dimension
+
+        # Get model output at first time step
+        outputs = self.model(static_feat, dynamic_feat, None)
+        return outputs[:, 0]  # Return first time step prediction
+
+
+# For simplicity, we'll compute SHAP values on the averaged features across time steps
+avg_dynamic_features = []
+for seq in val_sequences[:sample_size]:
+    avg_dyn = seq['dynamic_numeric'].mean(axis=0)
+    avg_fert = seq['fertilization_numeric'].mean(axis=0)
+    avg_fert_cat_fert = seq['fertilization_categorical_encoded']['fertilization_class'].mean(axis=0)
+    avg_fert_cat_appl = seq['fertilization_categorical_encoded']['appl_class'].mean(axis=0)
+    combined = np.concatenate([avg_dyn, avg_fert, avg_fert_cat_fert, avg_fert_cat_appl])
+    avg_dynamic_features.append(combined)
+
+# Combine static and averaged dynamic features
+all_features = []
+feature_names = []
+
+# Static features
+static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
+static_categorical_names = ['crop_class (encoded)']  # Simplified
+
+# Dynamic features
+dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)']
+fert_numeric_names = ['Split N amount (avg)', 'ferdur (avg)', 'sowdur (avg)', 'time_delta (avg)']
+fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(9)]
+fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(3)]
+
+feature_names = (
+    static_numeric_names
+    + static_categorical_names[:1]
+    + dynamic_numeric_names
+    + fert_numeric_names
+    + fert_cat_names_fert
+    + fert_cat_names_appl
+)
+
+for idx in range(sample_size):
+    seq = val_sequences[idx]
+    static = np.concatenate([seq['static_numeric'], seq['static_categorical_encoded']])
+    combined_feat = np.concatenate([static, avg_dynamic_features[idx]])
+    all_features.append(combined_feat)
+
+X_sample = np.array(all_features)
+
+
+# Create a simple predictor wrapper
+class SimplifiedRNNPredictor(nn.Module):
+    def __init__(self, original_model, sample_sequences):
+        super().__init__()
+        self.original_model = original_model
+        self.sample_sequences = sample_sequences
+
+    def forward(self, x_batch):
+        # x_batch: (batch, features)
+        predictions = []
+        for i in range(x_batch.shape[0]):
+            # Use the original sequence but with modified features
+            seq_idx = i % len(self.sample_sequences)
+            seq = self.sample_sequences[seq_idx]
+
+            static_dim = seq['static_numeric'].shape[0] + seq['static_categorical_encoded'].shape[0]
+            static_feat = x_batch[i, :static_dim].unsqueeze(0)
+
+            # Use original dynamic features (simplified)
+            dynamic_feat = torch.FloatTensor(seq['dynamic_numeric']).unsqueeze(0)
+            fert_num = torch.FloatTensor(seq['fertilization_numeric']).unsqueeze(0)
+            fert_cat_fert = torch.FloatTensor(
+                seq['fertilization_categorical_encoded']['fertilization_class']
+            ).unsqueeze(0)
+            fert_cat_appl = torch.FloatTensor(
+                seq['fertilization_categorical_encoded']['appl_class']
+            ).unsqueeze(0)
+
+            dynamic_combined = torch.cat(
+                [dynamic_feat, fert_num, fert_cat_fert, fert_cat_appl], dim=2
+            )
+
+            static_feat = static_feat.to(device)
+            dynamic_combined = dynamic_combined.to(device)
+
+            with torch.no_grad():
+                pred = self.original_model(static_feat, dynamic_combined, None)
+                predictions.append(pred.mean().item())  # Average across time steps
+
+        return torch.FloatTensor(predictions).to(device)
+
+
+wrapped_model = SimplifiedRNNPredictor(model, val_sequences[:sample_size])
+
+# Use KernelExplainer for model-agnostic explanation
+print('Using KernelExplainer (this may take a few minutes)...')
+background_data = shap.sample(X_sample, min(50, len(X_sample)))
+explainer = shap.KernelExplainer(
+    lambda x: wrapped_model(torch.FloatTensor(x).to(device)).cpu().detach().numpy(), background_data
+)
+
+# Compute SHAP values for a smaller sample
+shap_sample_size = min(20, len(X_sample))
+shap_values = explainer.shap_values(X_sample[:shap_sample_size])
+
+print(f'SHAP values computed for {shap_sample_size} samples')
+
+# Calculate mean absolute SHAP values
+mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+# Create SHAP importance DataFrame
+shap_importance = pd.DataFrame(
+    {'feature': feature_names[: len(mean_abs_shap)], 'shap_importance': mean_abs_shap}
+).sort_values('shap_importance', ascending=False)
+
+print('\nTop 15 Features by SHAP Importance:')
+print(shap_importance.head(15))
+
+# Save SHAP importance
+shap_importance.to_csv(output_dir / 'shap_importance.csv', index=False)
+
+# Visualize SHAP importance
+fig, ax = plt.subplots(figsize=(10, 8))
+shap_importance.head(15).plot(
+    x='feature', y='shap_importance', kind='barh', ax=ax, color='steelblue'
+)
+ax.set_xlabel('Mean |SHAP value|', fontsize=11)
+ax.set_title('Top 15 Features by SHAP Importance (RNN-ObsStep)', fontsize=12)
+ax.invert_yaxis()
+plt.tight_layout()
+plt.savefig(fig_dir / 'shap_importance.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Save SHAP values
+shap_data = {
+    'shap_values': shap_values,
+    'X_sample': X_sample[:shap_sample_size],
+    'feature_names': feature_names[: len(mean_abs_shap)],
+}
+with open(output_dir / 'shap_values.pkl', 'wb') as f:
+    pickle.dump(shap_data, f)
+
+print(f'\nSHAP analysis complete! Results saved to {output_dir}')
 

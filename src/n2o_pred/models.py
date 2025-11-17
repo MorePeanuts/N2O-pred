@@ -35,10 +35,9 @@ class N2OPredictorRNN(nn.Module):
         static_dim = static_numeric_dim + static_categorical_dim
         self.static_encoder = nn.Sequential(
             nn.Linear(static_dim, hidden_size),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
         )
 
         # Dynamic feature dimensions (including all numerical and categorical features)
@@ -72,7 +71,7 @@ class N2OPredictorRNN(nn.Module):
         # Output layer
         self.output_layer = nn.Sequential(
             nn.Linear(hidden_size, hidden_size // 2),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size // 2, 1),
         )
