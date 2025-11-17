@@ -7,7 +7,7 @@
 # 
 # **Key difference**: The loss is computed only at the true observation points (observed_mask=True), because data at all other time steps are obtained by interpolation.
 
-# In[ ]:
+# In[1]:
 
 
 import torch
@@ -39,7 +39,7 @@ print(f'Random seed: {RANDOM_SEED}')
 
 # ## 1. Load Data
 
-# In[ ]:
+# In[2]:
 
 
 data_dir = Path('../datasets/processed')
@@ -48,6 +48,11 @@ with open(data_dir / 'sequences_daily_step_train_processed.pkl', 'rb') as f:
     train_sequences = pickle.load(f)
 with open(data_dir / 'sequences_daily_step_val_processed.pkl', 'rb') as f:
     val_sequences = pickle.load(f)
+
+# Load scaler for inverse transformation
+with open('../preprocessor/scalers.pkl', 'rb') as f:
+    scalers = pickle.load(f)
+target_scaler = scalers['target_daily']
 
 print(f'Train: {len(train_sequences)}, Val: {len(val_sequences)}')
 print(f'Example sequence has {train_sequences[0]["seq_length"]} days')
@@ -58,7 +63,7 @@ print(
 
 # ## 2. Model Initialization and Training Setup
 
-# In[ ]:
+# In[3]:
 
 
 BATCH_SIZE = 16
@@ -135,7 +140,7 @@ print(f'Output: {output_dir}')
 
 # ## 3. Training Function
 
-# In[ ]:
+# In[4]:
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -164,10 +169,17 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     return total_loss / total_samples
 
 
-def evaluate(model, dataloader, criterion, device):
+def inverse_symlog(y):
+    """Inverse symlog transformation"""
+    return np.sign(y) * (np.exp(np.abs(y)) - 1)
+
+
+def evaluate(model, dataloader, criterion, device, scaler):
+    """Evaluate model and return metrics on original scale"""
     model.eval()
     total_loss, total_samples = 0, 0
     all_preds, all_targets, all_targets_orig = [], [], []
+    all_preds_orig = []  # Store predictions on original scale
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc='Eval', leave=False):
@@ -189,22 +201,32 @@ def evaluate(model, dataloader, criterion, device):
                 obs_mask = observed_masks[i].cpu().numpy()
                 obs_indices = np.where(obs_mask)[0]
                 if len(obs_indices) > 0:
-                    all_preds.append(predictions[i, obs_indices].cpu().numpy())
+                    pred_seq = predictions[i, obs_indices].cpu().numpy()
+
+                    # Inverse transform predictions to original scale
+                    pred_denorm = scaler.inverse_transform(pred_seq.reshape(-1, 1)).flatten()
+                    pred_orig = inverse_symlog(pred_denorm)
+
+                    all_preds.append(pred_seq)  # Normalized predictions
+                    all_preds_orig.append(pred_orig)  # Original scale predictions
                     all_targets.append(targets[i, obs_indices].cpu().numpy())
                     all_targets_orig.append(targets_orig[i, obs_indices].numpy())
 
-    avg_loss = total_loss / total_samples
-    all_preds_flat = np.concatenate(all_preds)
-    all_targets_flat = np.concatenate(all_targets)
-    rmse = np.sqrt(np.mean((all_preds_flat - all_targets_flat) ** 2))
-    mae = np.mean(np.abs(all_preds_flat - all_targets_flat))
+    # Compute metrics on ORIGINAL scale
+    all_preds_orig_flat = np.concatenate(all_preds_orig)
+    all_targets_orig_flat = np.concatenate(all_targets_orig)
 
-    # Calculate R² (coefficient of determination)
-    ss_res = np.sum((all_targets_flat - all_preds_flat) ** 2)
-    ss_tot = np.sum((all_targets_flat - np.mean(all_targets_flat)) ** 2)
+    rmse = np.sqrt(np.mean((all_preds_orig_flat - all_targets_orig_flat) ** 2))
+    mae = np.mean(np.abs(all_preds_orig_flat - all_targets_orig_flat))
+
+    # Calculate R² on original scale
+    ss_res = np.sum((all_targets_orig_flat - all_preds_orig_flat) ** 2)
+    ss_tot = np.sum((all_targets_orig_flat - np.mean(all_targets_orig_flat)) ** 2)
     r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
-    return avg_loss, rmse, mae, r2, all_preds, all_targets, all_targets_orig
+    avg_loss = total_loss / total_samples
+
+    return avg_loss, rmse, mae, r2, all_preds, all_targets, all_targets_orig, all_preds_orig
 
 
 print('Training and evaluation functions defined')
@@ -223,7 +245,7 @@ patience_counter = 0
 print('Starting training...')
 for epoch in range(NUM_EPOCHS):
     train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-    val_loss, val_rmse, val_mae, val_r2, _, _, _ = evaluate(model, val_loader, criterion, device)
+    val_loss, val_rmse, val_mae, val_r2, _, _, _, _ = evaluate(model, val_loader, criterion, device, target_scaler)
     scheduler.step(val_loss)
     current_lr = optimizer.param_groups[0]['lr']
 
@@ -267,7 +289,7 @@ print('Training log saved')
 
 # ## 5. Visualization and Final Evaluation
 
-# In[ ]:
+# In[5]:
 
 
 fig_dir = output_dir / 'figures'
@@ -306,11 +328,11 @@ plt.show()
 checkpoint = torch.load(output_dir / 'best_model.pth', weights_only=False)
 model.load_state_dict(checkpoint['model_state_dict'])
 
-train_loss, train_rmse, train_mae, train_r2, train_preds, train_targets, train_targets_orig = (
-    evaluate(model, train_loader, criterion, device)
+train_loss, train_rmse, train_mae, train_r2, train_preds, train_targets, train_targets_orig, train_preds_orig = (
+    evaluate(model, train_loader, criterion, device, target_scaler)
 )
-val_loss, val_rmse, val_mae, val_r2, val_preds, val_targets, val_targets_orig = evaluate(
-    model, val_loader, criterion, device
+val_loss, val_rmse, val_mae, val_r2, val_preds, val_targets, val_targets_orig, val_preds_orig = evaluate(
+    model, val_loader, criterion, device, target_scaler
 )
 
 print(
@@ -322,23 +344,27 @@ print(
 
 predictions = {
     'train': {
-        'predictions': train_preds,
-        'targets': train_targets,
-        'targets_original': train_targets_orig,
+        'predictions': train_preds_orig,  # Original scale
+        'targets': train_targets,  # Normalized scale
+        'targets_original': train_targets_orig,  # Original scale
     },
-    'val': {'predictions': val_preds, 'targets': val_targets, 'targets_original': val_targets_orig},
+    'val': {
+        'predictions': val_preds_orig,  # Original scale
+        'targets': val_targets,  # Normalized scale
+        'targets_original': val_targets_orig  # Original scale
+    },
     'metrics': {
         'train': {
             'loss': float(train_loss),
-            'rmse': float(train_rmse),
-            'mae': float(train_mae),
-            'r2': float(train_r2),
+            'rmse': float(train_rmse),  # Computed on original scale
+            'mae': float(train_mae),  # Computed on original scale
+            'r2': float(train_r2),  # Computed on original scale
         },
         'val': {
             'loss': float(val_loss),
-            'rmse': float(val_rmse),
-            'mae': float(val_mae),
-            'r2': float(val_r2),
+            'rmse': float(val_rmse),  # Computed on original scale
+            'mae': float(val_mae),  # Computed on original scale
+            'r2': float(val_r2),  # Computed on original scale
         },
     },
 }
@@ -349,24 +375,8 @@ with open(output_dir / 'predictions.pkl', 'wb') as f:
 # Predictions vs True Values Scatter Plot
 fig, axes = plt.subplots(1, 2, figsize=(15, 5))
 
-# Load scalers to inverse transform
-import pickle as pkl
-
-with open('../preprocessor/scalers.pkl', 'rb') as f:
-    scalers = pkl.load(f)
-
-
-# Inverse symlog transformation
-def inverse_symlog(y):
-    return np.sign(y) * (np.exp(np.abs(y)) - 1)
-
-
-# Train set
-train_preds_all_flat = np.concatenate(train_preds)
-train_preds_denorm = (
-    scalers['target_daily'].inverse_transform(train_preds_all_flat.reshape(-1, 1)).flatten()
-)
-train_preds_orig_scale = inverse_symlog(train_preds_denorm)
+# Use the original scale predictions (already inverse transformed)
+train_preds_orig_scale = np.concatenate(train_preds_orig)
 train_targets_orig_scale = np.concatenate(train_targets_orig)
 
 axes[0].scatter(train_targets_orig_scale, train_preds_orig_scale, alpha=0.5, s=10)
@@ -382,11 +392,7 @@ axes[0].set_title(f'Train Set (R²={train_r2:.3f})', fontsize=12)
 axes[0].grid(True, alpha=0.3)
 
 # Validation set
-val_preds_all_flat = np.concatenate(val_preds)
-val_preds_denorm = (
-    scalers['target_daily'].inverse_transform(val_preds_all_flat.reshape(-1, 1)).flatten()
-)
-val_preds_orig_scale = inverse_symlog(val_preds_denorm)
+val_preds_orig_scale = np.concatenate(val_preds_orig)
 val_targets_orig_scale = np.concatenate(val_targets_orig)
 
 axes[1].scatter(val_targets_orig_scale, val_preds_orig_scale, alpha=0.5, s=10)
@@ -490,50 +496,51 @@ print(f'Total features: {len(feature_names)}, Sample shape: {X_sample.shape}')
 
 # Create a simplified predictor wrapper
 class SimplifiedRNNPredictor(nn.Module):
-    def __init__(self, original_model, sample_sequences, sample_indices):
+    def __init__(self, original_model, sample_sequences, sample_indices, device):
         super().__init__()
         self.original_model = original_model
         self.sample_sequences = [sample_sequences[i] for i in sample_indices]
+        self.device = device
 
     def forward(self, x_batch):
-        # x_batch: (batch, features)
+        # x_batch: (batch, features) - already on CPU from SHAP
+        # Convert to the model's device for fast inference
+        x_batch_device = torch.FloatTensor(x_batch).to(self.device) if not isinstance(x_batch, torch.Tensor) else x_batch.to(self.device)
+
         predictions = []
-        for i in range(x_batch.shape[0]):
+        for i in range(x_batch_device.shape[0]):
             # Use the original sequence structure
             seq_idx = i % len(self.sample_sequences)
             seq = self.sample_sequences[seq_idx]
 
             static_dim = seq['static_numeric'].shape[0] + seq['static_categorical_encoded'].shape[0]
-            static_feat = x_batch[i, :static_dim].unsqueeze(0)
+            static_feat = x_batch_device[i, :static_dim].unsqueeze(0)
 
-            # Use original dynamic features
-            dynamic_feat = torch.FloatTensor(seq['dynamic_numeric']).unsqueeze(0)
-            fert_num = torch.FloatTensor(seq['fertilization_numeric']).unsqueeze(0)
+            # Use original dynamic features - move to device directly
+            dynamic_feat = torch.FloatTensor(seq['dynamic_numeric']).unsqueeze(0).to(self.device)
+            fert_num = torch.FloatTensor(seq['fertilization_numeric']).unsqueeze(0).to(self.device)
             fert_cat_fert = torch.FloatTensor(
                 seq['fertilization_categorical_encoded']['fertilization_class']
-            ).unsqueeze(0)
+            ).unsqueeze(0).to(self.device)
             fert_cat_appl = torch.FloatTensor(
                 seq['fertilization_categorical_encoded']['appl_class']
-            ).unsqueeze(0)
+            ).unsqueeze(0).to(self.device)
 
             dynamic_combined = torch.cat(
                 [dynamic_feat, fert_num, fert_cat_fert, fert_cat_appl], dim=2
             )
 
-            static_feat = static_feat.to(device)
-            dynamic_combined = dynamic_combined.to(device)
-
             with torch.no_grad():
                 pred = self.original_model(static_feat, dynamic_combined, None)
                 # Average over observed points only
-                obs_mask = torch.BoolTensor(seq['observed_mask']).to(device)
+                obs_mask = torch.BoolTensor(seq['observed_mask']).to(self.device)
                 pred_obs = pred[0, obs_mask]
                 predictions.append(pred_obs.mean().item())
 
-        return torch.FloatTensor(predictions).to(device)
+        return torch.FloatTensor(predictions)  # Return on CPU for SHAP
 
 
-wrapped_model = SimplifiedRNNPredictor(model, val_sequences, val_sample_indices)
+wrapped_model = SimplifiedRNNPredictor(model, val_sequences, val_sample_indices, device)
 
 # Use KernelExplainer
 print('Using KernelExplainer (this may take a few minutes)...')
@@ -551,23 +558,78 @@ print(f'SHAP values computed for {shap_sample_size} samples')
 # Calculate mean absolute SHAP values
 mean_abs_shap = np.abs(shap_values).mean(axis=0)
 
-# Create SHAP importance DataFrame
-shap_importance = pd.DataFrame(
+# Create SHAP importance DataFrame (raw)
+shap_importance_raw = pd.DataFrame(
     {'feature': feature_names[: len(mean_abs_shap)], 'shap_importance': mean_abs_shap}
 ).sort_values('shap_importance', ascending=False)
 
-print('\nTop 15 Features by SHAP Importance:')
-print(shap_importance.head(15))
+print('\nTop 15 Features by SHAP Importance (Raw):')
+print(shap_importance_raw.head(15))
 
-# Save SHAP importance
-shap_importance.to_csv(output_dir / 'shap_importance.csv', index=False)
+# Save raw SHAP importance
+shap_importance_raw.to_csv(output_dir / 'shap_importance_raw.csv', index=False)
 
-# Visualize SHAP importance
-fig, ax = plt.subplots(figsize=(10, 8))
-shap_importance.head(15).plot(x='feature', y='shap_importance', kind='barh', ax=ax, color='coral')
-ax.set_xlabel('Mean |SHAP value|', fontsize=11)
-ax.set_title('Top 15 Features by SHAP Importance (RNN-DailyStep)', fontsize=12)
-ax.invert_yaxis()
+
+# Aggregate SHAP importance for categorical features
+def aggregate_shap_importance(shap_importance_df):
+    """Aggregate SHAP importance for one-hot encoded categorical features"""
+    aggregated = {}
+
+    categorical_features = ['crop_class', 'fertilization_class', 'appl_class']
+
+    for _, row in shap_importance_df.iterrows():
+        feat_name = row['feature']
+        importance = row['shap_importance']
+
+        is_categorical = False
+        for cat_feat in categorical_features:
+            if cat_feat in feat_name and ('(encoded)' in feat_name or '(avg)' in feat_name):
+                # This is a categorical feature, aggregate to original name
+                if cat_feat not in aggregated:
+                    aggregated[cat_feat] = 0
+                aggregated[cat_feat] += importance
+                is_categorical = True
+                break
+
+        if not is_categorical:
+            aggregated[feat_name] = importance
+
+    aggregated_df = pd.DataFrame(
+        [{'feature': feat, 'shap_importance': imp} for feat, imp in aggregated.items()]
+    ).sort_values('shap_importance', ascending=False)
+
+    return aggregated_df
+
+
+shap_importance_agg = aggregate_shap_importance(shap_importance_raw)
+
+print('\n' + '=' * 60)
+print('Aggregated SHAP Importance (Categorical features combined):')
+print('=' * 60)
+print(shap_importance_agg)
+
+# Save aggregated SHAP importance
+shap_importance_agg.to_csv(output_dir / 'shap_importance_aggregated.csv', index=False)
+
+# Visualize SHAP importance (both raw and aggregated)
+fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+# Left: Top 15 raw features
+shap_importance_raw.head(15).plot(
+    x='feature', y='shap_importance', kind='barh', ax=axes[0], color='steelblue', legend=False
+)
+axes[0].set_xlabel('Mean |SHAP value|', fontsize=11)
+axes[0].set_title('Top 15 Raw Features by SHAP Importance (RNN-DailyStep)', fontsize=12)
+axes[0].invert_yaxis()
+
+# Right: All aggregated features
+shap_importance_agg.plot(
+    x='feature', y='shap_importance', kind='barh', ax=axes[1], color='coral', legend=False
+)
+axes[1].set_xlabel('Mean |SHAP value|', fontsize=11)
+axes[1].set_title('Aggregated SHAP Importance (RNN-DailyStep)', fontsize=12)
+axes[1].invert_yaxis()
+
 plt.tight_layout()
 plt.savefig(fig_dir / 'shap_importance.png', dpi=150, bbox_inches='tight')
 plt.show()
