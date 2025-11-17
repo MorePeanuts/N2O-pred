@@ -11,3 +11,8 @@ wheels/
 
 # datasets
 datasets
+
+.cursor/
+**/.DS_Store
+
+outputs/

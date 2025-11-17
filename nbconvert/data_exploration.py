@@ -39,7 +39,7 @@ numeric_dynamic_features = {
     'WFPS': '土壤含水量',
     'NH4+-N': '铵态氮',
     'NO3_-N': '硝态氮',
-    'MN': '矿质氮含量（铵态+硝态氮）',
+    'MN': '矿质氮含量（铵态+硝态氮）'
 }
 
 classification_static_features = {
@@ -50,10 +50,14 @@ fertilization_features = {
     'fertilization_class': '上次施肥类型',
     'Split N amount': '上次施肥量',
     'appl_class': '上次施肥方式',
-    'ferdur': '该次测量距上次施肥的天数',
+    'ferdur': '该次测量距上次施肥的天数'
 }
 
-optional_features = {'NH4+-N': '铵态氮', 'NO3_-N': '硝态氮', 'MN': '矿质氮含量（铵态+硝态氮）'}
+optional_features = {
+    'NH4+-N': '铵态氮',
+    'NO3_-N': '硝态氮',
+    'MN': '矿质氮含量（铵态+硝态氮）'
+}
 
 auxiliary_variables = {
     'Sowing date': '播种日期',
@@ -79,7 +83,7 @@ drop_variables = {
     'Total N amount',
     'Appl.code',
     'SE',
-    'Duration',
+    'Duration'
 }
 
 labels = {
@@ -92,17 +96,7 @@ labels = {
 # In[17]:
 
 
-len(
-    set(raw_data.columns)
-    - numeric_dynamic_features.keys()
-    - numeric_static_features.keys()
-    - fertilization_features.keys()
-    - classification_static_features.keys()
-    - group_variables.keys()
-    - drop_variables
-    - auxiliary_variables.keys()
-    - labels.keys()
-) == 0
+len(set(raw_data.columns) - numeric_dynamic_features.keys() - numeric_static_features.keys() - fertilization_features.keys() - classification_static_features.keys() - group_variables.keys() - drop_variables - auxiliary_variables.keys() - labels.keys()) == 0
 
 
 # Remove redundant columns, adjust the column order and delete all samples from the fallow period.
@@ -111,16 +105,14 @@ len(
 
 
 processed_data = raw_data.drop(columns=drop_variables)
-processed_data = processed_data[
-    [
-        *group_variables.keys(),
-        *labels.keys(),
-        *classification_static_features.keys(),
-        *numeric_static_features.keys(),
-        *fertilization_features.keys(),
-        *numeric_dynamic_features.keys(),
-    ]
-]
+processed_data = processed_data[[
+    *group_variables.keys(),
+    *labels.keys(),
+    *classification_static_features.keys(),
+    *numeric_static_features.keys(),
+    *fertilization_features.keys(),
+    *numeric_dynamic_features.keys(),
+]]
 
 print('Before drop all samples of fallow period, total sample: ', len(processed_data))
 fallow_mask = (processed_data['sowdur'] < 0) | (processed_data['control_group'] < 0)
@@ -134,9 +126,7 @@ print('After delete all samples of fallow period, processed sample: ', len(proce
 # In[19]:
 
 
-processed_data.loc[
-    (~processed_data['Split N amount'].isnull()) & (processed_data['ferdur'] < 0), 'ferdur'
-] = 0
+processed_data.loc[(~processed_data['Split N amount'].isnull()) & (processed_data['ferdur'] < 0), 'ferdur'] = 0
 
 
 # Fill the missing parts of `Split N amount` with zeros.
@@ -152,12 +142,7 @@ processed_data['Split N amount'] = processed_data['Split N amount'].fillna(0)
 # In[21]:
 
 
-numeric_columns = (
-    labels.keys()
-    | numeric_static_features.keys()
-    | numeric_dynamic_features.keys()
-    | {'ferdur', 'Split N amount'}
-)
+numeric_columns = labels.keys() | numeric_static_features.keys() | numeric_dynamic_features.keys() | {'ferdur', 'Split N amount'}
 
 numeric_df = processed_data[list(numeric_columns)]
 stats = numeric_df.describe().transpose()
@@ -188,9 +173,7 @@ processed_data[(~processed_data['Split N amount'].isnull()) & (processed_data['f
 # In[24]:
 
 
-classification_columns = classification_static_features.keys() | (
-    fertilization_features.keys() - {'ferdur', 'Split N amount'}
-)
+classification_columns = classification_static_features.keys() | (fertilization_features.keys() - {'ferdur', 'Split N amount'})
 
 classification_df = processed_data[list(classification_columns)]
 stats = classification_df.describe().transpose()
@@ -208,7 +191,8 @@ classification_summary
 
 
 reordered_data = processed_data.sort_values(
-    by=['Publication', 'control_group', 'sowdur'], ascending=True
+    by=['Publication', 'control_group', 'sowdur'],
+    ascending=True
 )
 reordered_data.to_csv('../datasets/data_EUR_reordered.csv', index=False)
 reordered_data
@@ -218,3 +202,4 @@ reordered_data
 
 
 reordered_data.dtypes
+

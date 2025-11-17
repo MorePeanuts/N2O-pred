@@ -11,7 +11,7 @@
 # 
 # - Scheme 3 (RF-Baseline): Random Forest baseline
 
-# In[ ]:
+# In[1]:
 
 
 import numpy as np
@@ -26,7 +26,7 @@ import json
 # 
 # Specify the output directories for the three models
 
-# In[ ]:
+# In[10]:
 
 
 # Specify the model output directory (needs to be modified according to actual training results)
@@ -50,7 +50,8 @@ else:
     print(f'RNN-Obs: {rnn_obs_dir.name}')
     print(f'RNN-Daily: {rnn_daily_dir.name}')
 
-    # 加载预测结果
+    with open(rf_dir / 'metrics.json') as f:
+        rf_metrics = json.load(f)
     with open(rf_dir / 'predictions.pkl', 'rb') as f:
         rf_predictions = pickle.load(f)
     with open(rnn_obs_dir / 'predictions.pkl', 'rb') as f:
@@ -59,32 +60,33 @@ else:
         rnn_daily_predictions = pickle.load(f)
 
 
+# In[11]:
+
+
+rf_predictions
+
+
 # ## 2. Evaluation Metrics Comparison
 
-# In[ ]:
+# In[12]:
 
 
 metrics_data = []
 
 # RF
-if 'metrics' in rf_predictions:
-    metrics_data.append(
-        {
-            'Model': 'RF-Baseline',
-            'Train Loss': rf_predictions['metrics']['train']['loss']
-            if 'loss' in rf_predictions['metrics']['train']
-            else '-',
-            'Train RMSE': rf_predictions['metrics']['train']['rmse'],
-            'Train MAE': rf_predictions['metrics']['train']['mae'],
-            'Train R²': rf_predictions['metrics']['train'].get('r2', '-'),
-            'Val Loss': rf_predictions['metrics']['val']['loss']
-            if 'loss' in rf_predictions['metrics']['val']
-            else '-',
-            'Val RMSE': rf_predictions['metrics']['val']['rmse'],
-            'Val MAE': rf_predictions['metrics']['val']['mae'],
-            'Val R²': rf_predictions['metrics']['val'].get('r2', '-'),
-        }
-    )
+metrics_data.append(
+    {
+        'Model': 'RF-Baseline',
+        'Train Loss':  '-',
+        'Train RMSE': rf_metrics['train']['rmse'],
+        'Train MAE': rf_metrics['train']['mae'],
+        'Train R²': rf_metrics['train']['r2'],
+        'Val Loss': '-',
+        'Val RMSE': rf_metrics['val']['rmse'],
+        'Val MAE': rf_metrics['val']['mae'],
+        'Val R²': rf_metrics['val']['r2'],
+    }
+)
 
 # RNN-Obs
 metrics_data.append(
@@ -134,7 +136,7 @@ print(f'\nThe table has been saved to: {comparison_dir / "metrics_comparison.csv
 # 
 # Randomly sample sequences from the validation set and compare the prediction performance of the three models.
 
-# In[ ]:
+# In[13]:
 
 
 # Randomly sample sequences for visualization
@@ -214,7 +216,7 @@ print(f'Sequence comparison plot has been saved to: {fig_dir}')
 # 
 # Analyze the error distribution and prediction performance of different models
 
-# In[ ]:
+# In[16]:
 
 
 # Calculate the error for all validation set samples
@@ -279,7 +281,7 @@ axes[0, 1].grid(True, alpha=0.3)
 
 # 3. Absolute Error Distribution (Box Plot)
 error_data = [rnn_obs_abs_errors, rnn_daily_abs_errors, rf_abs_errors]
-axes[1, 0].boxplot(error_data, labels=['RNN-ObsStep', 'RNN-DailyStep', 'RF-Baseline'])
+axes[1, 0].boxplot(error_data, tick_labels=['RNN-ObsStep', 'RNN-DailyStep', 'RF-Baseline'])
 axes[1, 0].set_ylabel('Absolute Error', fontsize=11)
 axes[1, 0].set_title('Absolute Error Distribution', fontsize=12)
 axes[1, 0].grid(True, alpha=0.3, axis='y')
@@ -305,7 +307,7 @@ plt.show()
 print(f'Error analysis plot has been saved to: {fig_dir / "error_analysis.png"}')
 
 
-# In[ ]:
+# In[15]:
 
 
 report_path = Path('../docs/models-comparation.md')

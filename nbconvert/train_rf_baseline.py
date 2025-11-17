@@ -5,7 +5,7 @@
 # 
 # Schema 3: Use Random Forest as the baseline
 
-# In[ ]:
+# In[2]:
 
 
 import pandas as pd
@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 # ## 1. Load Data
 
-# In[ ]:
+# In[7]:
 
 
 data_dir = Path('../datasets')
@@ -34,12 +34,13 @@ print(f"Val samples: {len(val_df)}")
 print(f"Features: {train_df.columns.tolist()}")
 
 
-# In[ ]:
+# In[8]:
 
 
 # Separate features and target
 target_col = 'Daily fluxes'
 feature_cols = [col for col in train_df.columns if col != target_col]
+feature_cols.remove('No. of obs')
 
 X_train = train_df[feature_cols]
 y_train = train_df[target_col]
@@ -51,27 +52,27 @@ print(f"X_train shape: {X_train.shape}")
 print(f"y_train shape: {y_train.shape}")
 
 
-# In[ ]:
+# In[9]:
 
 
 # Handling Categorical Features (One-Hot Encoding)
-categorical_cols = ['crop_class', 'fertilization_class', 'appl_class']
-X_train_encoded = pd.get_dummies(X_train, columns=categorical_cols, drop_first=False)
-X_val_encoded = pd.get_dummies(X_val, columns=categorical_cols, drop_first=False)
+# categorical_cols = ['crop_class', 'fertilization_class', 'appl_class']
+# X_train = pd.get_dummies(X_train, columns=categorical_cols, drop_first=False)
+# X_val = pd.get_dummies(X_val, columns=categorical_cols, drop_first=False)
 
 # Ensure the columns in the training set and validation set are consistent
-missing_cols = set(X_train_encoded.columns) - set(X_val_encoded.columns)
+missing_cols = set(X_train.columns) - set(X_val.columns)
 for col in missing_cols:
-    X_val_encoded[col] = 0
+    X_val[col] = 0
 
-extra_cols = set(X_val_encoded.columns) - set(X_train_encoded.columns)
+extra_cols = set(X_val.columns) - set(X_train.columns)
 for col in extra_cols:
-    X_train_encoded[col] = 0
+    X_train[col] = 0
 
-X_val_encoded = X_val_encoded[X_train_encoded.columns]
+X_val = X_val[X_train.columns]
 
-print(f"After encoding - X_train shape: {X_train_encoded.shape}")
-print(f"After encoding - X_val shape: {X_val_encoded.shape}")
+print(f"After encoding - X_train shape: {X_train.shape}")
+print(f"After encoding - X_val shape: {X_val.shape}")
 
 
 # ## 2. Train the Random Forest Model
@@ -94,9 +95,9 @@ config = {
     'model_type': 'RandomForest',
     'task_name': task_name,
     'timestamp': datetime.now().isoformat(),
-    'train_samples': len(X_train_encoded),
-    'val_samples': len(X_val_encoded),
-    'n_features': X_train_encoded.shape[1]
+    'train_samples': len(X_train),
+    'val_samples': len(X_val),
+    'n_features': X_train.shape[1]
 }
 
 # Save Configuration
@@ -125,7 +126,7 @@ grid_search = GridSearchCV(
     verbose=2, n_jobs=-1
 )
 
-grid_search.fit(X_train_encoded, y_train)
+grid_search.fit(X_train, y_train)
 
 print(f"\nBest parameters: {grid_search.best_params_}")
 print(f"Best CV score (neg_MSE): {grid_search.best_score_:.4f}")
@@ -139,8 +140,8 @@ best_model = grid_search.best_estimator_
 
 
 # Predicting
-train_pred = best_model.predict(X_train_encoded)
-val_pred = best_model.predict(X_val_encoded)
+train_pred = best_model.predict(X_train)
+val_pred = best_model.predict(X_val)
 
 # Calculate Metrics
 train_rmse = np.sqrt(mean_squared_error(y_train, train_pred))
@@ -229,7 +230,7 @@ print(f"Figure saved to {fig_dir}")
 
 # Feature Importance
 feature_importance = pd.DataFrame({
-    'feature': X_train_encoded.columns,
+    'feature': X_train.columns,
     'importance': best_model.feature_importances_
 }).sort_values('importance', ascending=False)
 
