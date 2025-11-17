@@ -200,31 +200,31 @@ scalers['static_numeric_obs'].transform(seq['static_numeric'][None, :]).flatten(
 
 # ## 4. Apply to RNN dataset
 
-# In[11]:
+# In[ ]:
 
 
 def transform_obs_sequences(seqs):
     result = []
     for seq in seqs:
         t_seq = {'seq_id': seq['seq_id'], 'seq_length': seq['seq_length']}
-        t_seq['static_numeric'] = scalers['static_numeric_obs'].transform(seq['static_numeric'][None, :]).flatten().astype(np.float64)
-        t_seq['static_categorical_encoded'] = encoders['crop_class'].transform([[seq['static_categorical']['crop_class']]]).flatten().astype(np.float64)
+        t_seq['static_numeric'] = scalers['static_numeric_obs'].transform(seq['static_numeric'][None, :]).flatten().astype(np.float32)
+        t_seq['static_categorical_encoded'] = encoders['crop_class'].transform([[seq['static_categorical']['crop_class']]]).flatten().astype(np.float32)
 
         dyn = seq['dynamic_numeric'].copy()
         dyn[:, 1] = log1p_transform(dyn[:, 1])
-        t_seq['dynamic_numeric'] = scalers['dynamic_numeric_obs'].transform(dyn).astype(np.float64)
+        t_seq['dynamic_numeric'] = scalers['dynamic_numeric_obs'].transform(dyn).astype(np.float32)
 
         fert = seq['fertilization_numeric'].copy()
         fert[:, :3] = log1p_transform(fert[:, :3])
-        t_seq['fertilization_numeric'] = scalers['fertilization_numeric_obs'].transform(fert).astype(np.float64)
+        t_seq['fertilization_numeric'] = scalers['fertilization_numeric_obs'].transform(fert).astype(np.float32)
 
         t_seq['fertilization_categorical_encoded'] = {
-            'fertilization_class': encoders['fertilization_class'].transform(seq['fertilization_categorical']['fertilization_class'].reshape(-1,1)).astype(np.float64),
-            'appl_class': encoders['appl_class'].transform(seq['fertilization_categorical']['appl_class'].reshape(-1,1)).astype(np.float64)
+            'fertilization_class': encoders['fertilization_class'].transform(seq['fertilization_categorical']['fertilization_class'].reshape(-1,1)).astype(np.float32),
+            'appl_class': encoders['appl_class'].transform(seq['fertilization_categorical']['appl_class'].reshape(-1,1)).astype(np.float32)
         }
 
         tgt = symlog_transform(seq['target'])
-        t_seq['target'] = scalers['target_obs'].transform(tgt.reshape(-1,1)).flatten().astype(np.float64)
+        t_seq['target'] = scalers['target_obs'].transform(tgt.reshape(-1,1)).flatten().astype(np.float32)
         t_seq['target_original'] = seq['target']
         result.append(t_seq)
     return result
@@ -241,7 +241,7 @@ print(f"Done: {len(train_obs_t)} train, {len(val_obs_t)} val")
 train_obs_t[0]
 
 
-# In[13]:
+# In[ ]:
 
 
 def transform_daily_sequences(seqs):
@@ -252,23 +252,23 @@ def transform_daily_sequences(seqs):
             'min_day': seq['min_day'], 'max_day': seq['max_day'],
             'observed_mask': seq['observed_mask']
         }
-        t_seq['static_numeric'] = scalers['static_numeric_daily'].transform(seq['static_numeric'][None, :]).flatten().astype(np.float64)
-        t_seq['static_categorical_encoded'] = encoders['crop_class'].transform([[seq['static_categorical']['crop_class']]]).flatten().astype(np.float64)
+        t_seq['static_numeric'] = scalers['static_numeric_daily'].transform(seq['static_numeric'][None, :]).flatten().astype(np.float32)
+        t_seq['static_categorical_encoded'] = encoders['crop_class'].transform([[seq['static_categorical']['crop_class']]]).flatten().astype(np.float32)
 
         dyn = seq['dynamic_numeric'].copy()
         dyn[:, 1] = log1p_transform(dyn[:, 1])
-        t_seq['dynamic_numeric'] = scalers['dynamic_numeric_daily'].transform(dyn).astype(np.float64)
+        t_seq['dynamic_numeric'] = scalers['dynamic_numeric_daily'].transform(dyn).astype(np.float32)
 
         fert = log1p_transform(seq['fertilization_numeric'])
-        t_seq['fertilization_numeric'] = scalers['fertilization_numeric_daily'].transform(fert).astype(np.float64)
+        t_seq['fertilization_numeric'] = scalers['fertilization_numeric_daily'].transform(fert).astype(np.float32)
 
         t_seq['fertilization_categorical_encoded'] = {
-            'fertilization_class': encoders['fertilization_class'].transform(seq['fertilization_categorical']['fertilization_class'].reshape(-1,1)).astype(np.float64),
-            'appl_class': encoders['appl_class'].transform(seq['fertilization_categorical']['appl_class'].reshape(-1,1)).astype(np.float64)
+            'fertilization_class': encoders['fertilization_class'].transform(seq['fertilization_categorical']['fertilization_class'].reshape(-1,1)).astype(np.float32),
+            'appl_class': encoders['appl_class'].transform(seq['fertilization_categorical']['appl_class'].reshape(-1,1)).astype(np.float32)
         }
 
         tgt = symlog_transform(seq['target'])
-        t_seq['target'] = scalers['target_daily'].transform(tgt.reshape(-1,1)).flatten().astype(np.float64)
+        t_seq['target'] = scalers['target_daily'].transform(tgt.reshape(-1,1)).flatten().astype(np.float32)
         t_seq['target_original'] = seq['target']
         result.append(t_seq)
     return result

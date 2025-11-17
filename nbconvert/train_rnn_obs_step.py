@@ -65,11 +65,12 @@ print(f'Train: {len(train_sequences)}, Val: {len(val_sequences)}')
 BATCH_SIZE = 16
 HIDDEN_SIZE = 64
 NUM_LAYERS = 1
-DROPOUT = 0.5
-RNN_TYPE = 'LSTM'
+DROPOUT = 0.2
+RNN_TYPE = 'GRU'
 LEARNING_RATE = 0.001
-NUM_EPOCHS = 100
+NUM_EPOCHS = 200
 PATIENCE = 20
+WEIGHT_DECAY = 0.0001
 
 train_loader = create_dataloader(
     train_sequences, 'obs_step', BATCH_SIZE, shuffle=True, num_workers=0
@@ -117,13 +118,14 @@ config = {
         'learning_rate': LEARNING_RATE,
         'num_epochs': NUM_EPOCHS,
         'patience': PATIENCE,
+        'weight_decay': WEIGHT_DECAY,
     },
 }
 with open(output_dir / 'config.json', 'w') as f:
     json.dump(config, f, indent=2)
 
 criterion = nn.MSELoss(reduction='none')
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
 print(f'Output: {output_dir}')
@@ -230,7 +232,9 @@ patience_counter = 0
 print('Starting training...')
 for epoch in range(NUM_EPOCHS):
     train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-    val_loss, val_rmse, val_mae, val_r2, _, _, _, _ = evaluate(model, val_loader, criterion, device, target_scaler)
+    val_loss, val_rmse, val_mae, val_r2, _, _, _, _ = evaluate(
+        model, val_loader, criterion, device, target_scaler
+    )
     scheduler.step(val_loss)
     current_lr = optimizer.param_groups[0]['lr']
 
@@ -308,11 +312,18 @@ plt.show()
 checkpoint = torch.load(output_dir / 'best_model.pth', weights_only=False)
 model.load_state_dict(checkpoint['model_state_dict'])
 
-train_loss, train_rmse, train_mae, train_r2, train_preds, train_targets, train_targets_orig, train_preds_orig = (
-    evaluate(model, train_loader, criterion, device, target_scaler)
-)
-val_loss, val_rmse, val_mae, val_r2, val_preds, val_targets, val_targets_orig, val_preds_orig = evaluate(
-    model, val_loader, criterion, device, target_scaler
+(
+    train_loss,
+    train_rmse,
+    train_mae,
+    train_r2,
+    train_preds,
+    train_targets,
+    train_targets_orig,
+    train_preds_orig,
+) = evaluate(model, train_loader, criterion, device, target_scaler)
+val_loss, val_rmse, val_mae, val_r2, val_preds, val_targets, val_targets_orig, val_preds_orig = (
+    evaluate(model, val_loader, criterion, device, target_scaler)
 )
 
 print(
@@ -332,7 +343,7 @@ predictions = {
     'val': {
         'predictions': val_preds_orig,  # Original scale
         'targets': val_targets,  # Normalized scale
-        'targets_original': val_targets_orig  # Original scale
+        'targets_original': val_targets_orig,  # Original scale
     },
     'metrics': {
         'train': {
@@ -499,7 +510,9 @@ static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N'][:n_static
 static_categorical_names = [f'crop_class_{i} (encoded)' for i in range(n_static_categorical)]
 
 # Dynamic features (averaged across time)
-dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)', 'time_delta (avg)'][:n_dynamic_numeric]
+dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)', 'time_delta (avg)'][
+    :n_dynamic_numeric
+]
 fert_numeric_names = [f'fert_numeric_{i} (avg)' for i in range(n_fert_numeric)]
 fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(n_fert_cat_fert)]
 fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(n_fert_cat_appl)]
@@ -534,7 +547,11 @@ class SimplifiedRNNPredictor(nn.Module):
     def forward(self, x_batch):
         # x_batch: (batch, features) - already on CPU from SHAP
         # Convert to the model's device for fast inference
-        x_batch_device = torch.FloatTensor(x_batch).to(self.device) if not isinstance(x_batch, torch.Tensor) else x_batch.to(self.device)
+        x_batch_device = (
+            torch.FloatTensor(x_batch).to(self.device)
+            if not isinstance(x_batch, torch.Tensor)
+            else x_batch.to(self.device)
+        )
 
         predictions = []
         for i in range(x_batch_device.shape[0]):
@@ -548,12 +565,16 @@ class SimplifiedRNNPredictor(nn.Module):
             # Use original dynamic features - move to device directly
             dynamic_feat = torch.FloatTensor(seq['dynamic_numeric']).unsqueeze(0).to(self.device)
             fert_num = torch.FloatTensor(seq['fertilization_numeric']).unsqueeze(0).to(self.device)
-            fert_cat_fert = torch.FloatTensor(
-                seq['fertilization_categorical_encoded']['fertilization_class']
-            ).unsqueeze(0).to(self.device)
-            fert_cat_appl = torch.FloatTensor(
-                seq['fertilization_categorical_encoded']['appl_class']
-            ).unsqueeze(0).to(self.device)
+            fert_cat_fert = (
+                torch.FloatTensor(seq['fertilization_categorical_encoded']['fertilization_class'])
+                .unsqueeze(0)
+                .to(self.device)
+            )
+            fert_cat_appl = (
+                torch.FloatTensor(seq['fertilization_categorical_encoded']['appl_class'])
+                .unsqueeze(0)
+                .to(self.device)
+            )
 
             dynamic_combined = torch.cat(
                 [dynamic_feat, fert_num, fert_cat_fert, fert_cat_appl], dim=2

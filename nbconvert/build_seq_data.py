@@ -132,7 +132,7 @@ print(f"Val samples: {(df['split']=='val').sum()}")
 # 
 # **Characteristics**: Event-driven; each step corresponds to one observation
 
-# In[30]:
+# In[ ]:
 
 
 def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
@@ -171,7 +171,7 @@ def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
             'seq_length': len(seq_df),
 
             # Static Features (Numerical)
-            'static_numeric': seq_df[static_features].iloc[0].values.astype(np.float64),
+            'static_numeric': seq_df[static_features].iloc[0].values.astype(np.float32),
 
             # Static Features (Classification)
             'static_categorical': {
@@ -179,7 +179,7 @@ def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
             },
 
             # Dynamic Features (Numerical)
-            'dynamic_numeric': seq_df[dynamic_features].values.astype(np.float64),
+            'dynamic_numeric': seq_df[dynamic_features].values.astype(np.float32),
 
             # Fertilization-related features
             'fertilization_categorical': {
@@ -191,10 +191,10 @@ def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
                 ferdur_processed,
                 seq_df['sowdur'].values,
                 time_delta
-            ], axis=1).astype(np.float64),
+            ], axis=1).astype(np.float32),
 
             # Target variable
-            'target': seq_df[target].values.astype(np.float64)
+            'target': seq_df[target].values.astype(np.float32)
         }
 
         sequences.append(sequence)
@@ -240,7 +240,7 @@ print(f"\nObsStep sequences saved to {output_dir}")
 # 
 # **Characteristics**: Time-driven, each step corresponds to one day
 
-# In[33]:
+# In[ ]:
 
 
 def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
@@ -291,11 +291,11 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
         for feat in dynamic_numeric_features:
             values = seq_df[feat].values
             interpolated = np.interp(daily_index, obs_days, values)
-            daily_data[feat] = interpolated.astype(np.float64)
+            daily_data[feat] = interpolated.astype(np.float32)
 
         # Prec padded with 0
-        daily_prec = np.zeros(n_days, dtype=np.float64)
-        daily_prec[obs_days - min_day] = seq_df[prec_feature].values.astype(np.float64)
+        daily_prec = np.zeros(n_days, dtype=np.float32)
+        daily_prec[obs_days - min_day] = seq_df[prec_feature].values.astype(np.float32)
         daily_data[prec_feature] = daily_prec
 
         # Fertilization feature reconstruction
@@ -311,7 +311,7 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
                     fertilization_amounts.append(row['Split N amount'])
 
         # Split N amount: Only > 0 on fertilization days
-        daily_split_n = np.zeros(n_days, dtype=np.float64)
+        daily_split_n = np.zeros(n_days, dtype=np.float32)
         for fert_day, amount in zip(fertilization_days, fertilization_amounts, strict=True):
             daily_split_n[fert_day - min_day] = amount
         daily_data['Split N amount'] = daily_split_n
@@ -329,7 +329,7 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
 
         # Target variable: Linear interpolation (only true values at observation points)
         target_values = seq_df[target].values
-        daily_target = np.interp(daily_index, obs_days, target_values).astype(np.float64)
+        daily_target = np.interp(daily_index, obs_days, target_values).astype(np.float32)
         daily_data[target] = daily_target
 
         # Build the sequence dictionary
@@ -340,7 +340,7 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
             'max_day': max_day,
 
             # Static Features (Numerical)
-            'static_numeric': seq_df[static_features].iloc[0].values.astype(np.float64),
+            'static_numeric': seq_df[static_features].iloc[0].values.astype(np.float32),
 
             # Static Features (Classification)
             'static_categorical': {

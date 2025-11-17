@@ -23,7 +23,7 @@ import shap
 
 # ## 1. Load Data
 
-# In[ ]:
+# In[7]:
 
 
 data_dir = Path('../datasets')
@@ -35,7 +35,7 @@ print(f'Val samples: {len(val_df)}')
 print(f'Features: {train_df.columns.tolist()}')
 
 
-# In[ ]:
+# In[8]:
 
 
 # Separate features and target
@@ -53,7 +53,7 @@ print(f'X_train shape: {X_train.shape}')
 print(f'y_train shape: {y_train.shape}')
 
 
-# In[ ]:
+# In[9]:
 
 
 # Handling Categorical Features (One-Hot Encoding)
