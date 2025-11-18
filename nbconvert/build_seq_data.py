@@ -27,7 +27,7 @@ print(f"Random seed set to: {RANDOM_SEED}")
 
 # ## 1. General Preprocessing
 
-# In[22]:
+# In[2]:
 
 
 # Load data
@@ -37,37 +37,33 @@ print(f"Original data shape: {df.shape}")
 print(f"Columns: {df.columns}")
 
 
-# In[24]:
+# In[3]:
 
 
-# Remove features with high missing rates: NH4+-N, NO3_-N, MN (missing rate > 60%)
-high_missing_features = ['NH4+-N', 'NO3_-N', 'MN']
+# Remove features with high missing rates: NH4+-N, NO3_-N, MN, C/N
+high_missing_features = ['NH4+-N', 'NO3_-N', 'MN', 'C/N']
 df = df.drop(columns=high_missing_features)
 print(f"After dropping high missing features: {df.shape}")
 print(f"Remaining columns: {df.columns}")
 
 
-# In[25]:
+# In[4]:
 
 
-# Handle missing values for C/N and TN (33% missing rate)
+# Handle missing values for TN (33% missing rate)
 # First, forward-fill within each sequence, then fill any remaining missing values with the global median
-print(f"C/N missing ratio before: {df['C/N'].isnull().mean():.2%}")
 print(f"TN missing ratio before: {df['TN'].isnull().mean():.2%}")
 
 # Group by (Publication, control_group) and forward-fill within each sequence using .ffill()
-df['C/N'] = df.groupby(['Publication', 'control_group'])['C/N'].transform(lambda x: x.ffill())
 df['TN'] = df.groupby(['Publication', 'control_group'])['TN'].transform(lambda x: x.ffill())
 
 # Fill remaining missing values with the global median
-df['C/N'] = df['C/N'].fillna(df['C/N'].median())
 df['TN'] = df['TN'].fillna(df['TN'].median())
 
-print(f"C/N missing ratio after: {df['C/N'].isnull().mean():.2%}")
 print(f"TN missing ratio after: {df['TN'].isnull().mean():.2%}")
 
 
-# In[26]:
+# In[5]:
 
 
 # Group by (Publication, control_group) to build sequences
@@ -85,11 +81,11 @@ print("\nSequence length statistics:")
 print(seq_lengths.describe())
 
 
-# In[27]:
+# In[6]:
 
 
-# Filter out sequences that are too short (<10 steps)
-MIN_SEQ_LENGTH = 10
+# Filter out sequences that are too short (<8 steps)
+MIN_SEQ_LENGTH = 8
 valid_seq_ids = seq_lengths[seq_lengths >= MIN_SEQ_LENGTH].index
 df = df[df.set_index(['Publication', 'control_group']).index.isin(valid_seq_ids)].reset_index(drop=True)
 
@@ -105,34 +101,34 @@ print("\nFiltered sequence length statistics:")
 print(seq_lengths_filtered.describe())
 
 
-# In[28]:
+# In[7]:
 
 
-# Data split: randomly split at the sequence level into 90% training set and 10% validation set
+# Data split: randomly split at the sequence level into 90% training set and 10% test set
 all_seq_ids = list(seq_groups.groups.keys())
 n_train = int(len(all_seq_ids) * 0.9)
-n_val = len(all_seq_ids) - n_train
+n_test = len(all_seq_ids) - n_train
 
 np.random.shuffle(all_seq_ids)
 train_seq_ids = all_seq_ids[:n_train]
-val_seq_ids = all_seq_ids[n_train:]
+test_seq_ids = all_seq_ids[n_train:]
 
-# Create training and validation sets
-df['split'] = 'val'
+# Create training and test sets
+df['split'] = 'test'
 df.loc[df.set_index(['Publication', 'control_group']).index.isin(train_seq_ids), 'split'] = 'train'
 
 print(f"\nData split (random_seed={RANDOM_SEED}):")
 print(f"Train sequences: {n_train} ({n_train/len(all_seq_ids):.1%})")
-print(f"Val sequences: {n_val} ({n_val/len(all_seq_ids):.1%})")
+print(f"Test sequences: {n_test} ({n_test/len(all_seq_ids):.1%})")
 print(f"Train samples: {(df['split']=='train').sum()}")
-print(f"Val samples: {(df['split']=='val').sum()}")
+print(f"Test samples: {(df['split']=='test').sum()}")
 
 
 # ## 2. Scheme 1: Observation Step (ObsStep)
 # 
 # **Characteristics**: Event-driven; each step corresponds to one observation
 
-# In[ ]:
+# In[8]:
 
 
 def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
@@ -148,7 +144,7 @@ def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
     sequences = []
 
     # Define feature columns
-    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
+    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN']
     classification_static_features = ['crop_class']
     dynamic_features = ['Temp', 'Prec', 'ST', 'WFPS']
     # fertilization_features = ['fertilization_class', 'Split N amount', 'appl_class', 'ferdur', 'sowdur']
@@ -201,26 +197,26 @@ def build_obs_step_sequences(df_split: pd.DataFrame) -> list[dict]:
 
     return sequences
 
-# Build Training and Validation Sets
+# Build Training and test Sets
 print("Building ObsStep sequences...")
 train_obs = build_obs_step_sequences(df[df['split'] == 'train'])
-val_obs = build_obs_step_sequences(df[df['split'] == 'val'])
+test_obs = build_obs_step_sequences(df[df['split'] == 'test'])
 
 print(f"ObsStep Train sequences: {len(train_obs)}")
-print(f"ObsStep Val sequences: {len(val_obs)}")
+print(f"ObsStep Val sequences: {len(test_obs)}")
 print(f"Example sequence keys: {train_obs[0].keys()}")
 print(f"Example static_numeric shape: {train_obs[0]['static_numeric'].shape}")
 print(f"Example dynamic_numeric shape: {train_obs[0]['dynamic_numeric'].shape}")
 print(f"Example fertilization_numeric shape: {train_obs[0]['fertilization_numeric'].shape}")
 
 
-# In[31]:
+# In[9]:
 
 
 train_obs[0]
 
 
-# In[32]:
+# In[10]:
 
 
 # Save ObsStep sequence data
@@ -230,8 +226,8 @@ output_dir.mkdir(exist_ok=True)
 with open(output_dir / 'sequences_obs_step_train.pkl', 'wb') as f:
     pickle.dump(train_obs, f)
 
-with open(output_dir / 'sequences_obs_step_val.pkl', 'wb') as f:
-    pickle.dump(val_obs, f)
+with open(output_dir / 'sequences_obs_step_test.pkl', 'wb') as f:
+    pickle.dump(test_obs, f)
 
 print(f"\nObsStep sequences saved to {output_dir}")
 
@@ -240,7 +236,7 @@ print(f"\nObsStep sequences saved to {output_dir}")
 # 
 # **Characteristics**: Time-driven, each step corresponds to one day
 
-# In[ ]:
+# In[11]:
 
 
 def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
@@ -251,14 +247,16 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
         - Each step corresponds to one day
         - Daily data generated via interpolation
         - `Prec` filled with 0; other numeric features linearly interpolated
-        - Fertilization feature reconstruction: Split N amount > 0 on fertilization days, = 0 on other days
-        - Remove `ferdur`, `sowdur`
+        - Fertilization feature reconstruction:
+            * Split N amount > 0 on fertilization days, = 0 on other days
+            * ferdur: days since last fertilization (increments by 1 each day), -1 if not fertilized yet
+        - Remove `sowdur`
         - Create observation mask
     """
     sequences = []
 
     # Define feature columns
-    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
+    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN']
     classification_static_features = ['crop_class']
     dynamic_numeric_features = ['Temp', 'ST', 'WFPS']  # Linear interpolation required
     prec_feature = 'Prec'  # Pad with 0
@@ -316,6 +314,31 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
             daily_split_n[fert_day - min_day] = amount
         daily_data['Split N amount'] = daily_split_n
 
+        # ferdur: days since last fertilization
+        # For each day, calculate how many days have passed since the last fertilization
+        # If no fertilization yet, set to -1
+        daily_ferdur = np.full(n_days, -1, dtype=np.float32)
+
+        if fertilization_days:
+            # Sort fertilization days
+            sorted_fert_days = sorted(fertilization_days)
+
+            for day_idx in range(n_days):
+                current_day = daily_index[day_idx]
+                # Find the most recent fertilization day before or on current day
+                last_fert_day = None
+                for fert_day in sorted_fert_days:
+                    if fert_day <= current_day:
+                        last_fert_day = fert_day
+                    else:
+                        break
+
+                # If there was a fertilization before this day, calculate ferdur
+                if last_fert_day is not None:
+                    daily_ferdur[day_idx] = current_day - last_fert_day
+
+        daily_data['ferdur'] = daily_ferdur
+
         # fertilization_class, appl_class: Forward fill
         for feat in fertilization_categorical:
             daily_values = np.empty(n_days, dtype=object)
@@ -359,7 +382,10 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
             'fertilization_categorical': {
                 feat: daily_data[feat] for feat in fertilization_categorical
             },
-            'fertilization_numeric': daily_data['Split N amount'].reshape(-1, 1),
+            'fertilization_numeric': np.stack([
+                daily_data['Split N amount'],
+                daily_data['ferdur']
+            ], axis=1).astype(np.float32),
 
             # Observation mask
             'observed_mask': observed_mask,
@@ -372,13 +398,13 @@ def build_daily_step_sequences(df_split: pd.DataFrame) -> list[dict]:
 
     return sequences
 
-# Build Training and Validation Sets
+# Build Training and test Sets
 print("Building DailyStep sequences...")
 train_daily = build_daily_step_sequences(df[df['split'] == 'train'])
-val_daily = build_daily_step_sequences(df[df['split'] == 'val'])
+test_daily = build_daily_step_sequences(df[df['split'] == 'test'])
 
 print(f"DailyStep Train sequences: {len(train_daily)}")
-print(f"DailyStep Val sequences: {len(val_daily)}")
+print(f"DailyStep Val sequences: {len(test_daily)}")
 print(f"Example sequence keys: {train_daily[0].keys()}")
 print(f"Example static_numeric shape: {train_daily[0]['static_numeric'].shape}")
 print(f"Example dynamic_numeric shape: {train_daily[0]['dynamic_numeric'].shape}")
@@ -386,7 +412,7 @@ print(f"Example fertilization_numeric shape: {train_daily[0]['fertilization_nume
 print(f"Example observed_mask sum: {train_daily[0]['observed_mask'].sum()} / {train_daily[0]['seq_length']}")
 
 
-# In[34]:
+# In[12]:
 
 
 train_daily[2]
@@ -394,7 +420,7 @@ train_daily[2]
 
 # check data:
 
-# In[35]:
+# In[13]:
 
 
 split_n_amount = train_daily[2]['fertilization_numeric']
@@ -402,15 +428,15 @@ print('calculated fertilization days: ', np.where(split_n_amount > 0)[0])
 print('real fertilization days: ', np.array([20, 27, 34, 41, 48, 55, 62, 69, 76]))
 
 
-# In[36]:
+# In[14]:
 
 
 # Save DailyStep sequence data
 with open(output_dir / 'sequences_daily_step_train.pkl', 'wb') as f:
     pickle.dump(train_daily, f)
 
-with open(output_dir / 'sequences_daily_step_val.pkl', 'wb') as f:
-    pickle.dump(val_daily, f)
+with open(output_dir / 'sequences_daily_step_test.pkl', 'wb') as f:
+    pickle.dump(test_daily, f)
 
 print(f"\nDailyStep sequences saved to {output_dir}")
 
@@ -419,7 +445,7 @@ print(f"\nDailyStep sequences saved to {output_dir}")
 # 
 # **Characteristics**: Treat each time point as an independent sample
 
-# In[39]:
+# In[15]:
 
 
 def build_rf_data(df_split: pd.DataFrame) -> pd.DataFrame:
@@ -433,10 +459,10 @@ def build_rf_data(df_split: pd.DataFrame) -> pd.DataFrame:
     # Define id columns
     id_cols = ['No. of obs']
     # Define feature columns
-    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N']
+    static_features = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN']
     classification_static_features = ['crop_class']
     dynamic_features = ['Temp', 'Prec', 'ST', 'WFPS']
-    fertilization_features = ['fertilization_class', 'Split N amount', 'appl_class', 'ferdur', 'sowdur']
+    fertilization_features = ['fertilization_class', 'Split N amount', 'appl_class', 'ferdur']
     target = 'Daily fluxes'
 
     # Copy the data to avoid modifying the original data
@@ -452,22 +478,23 @@ def build_rf_data(df_split: pd.DataFrame) -> pd.DataFrame:
 
     return rf_data
 
-# Building the Training and Validation Sets
+# Building the Training and test Sets
 print("Building Random Forest format data...")
 train_rf = build_rf_data(df[df['split'] == 'train'])
-val_rf = build_rf_data(df[df['split'] == 'val'])
+test_rf = build_rf_data(df[df['split'] == 'test'])
 
 print(f"RF Train samples: {len(train_rf)}")
-print(f"RF Val samples: {len(val_rf)}")
-print(f"RF features: {train_rf.columns.tolist()}")
+print(f"RF Val samples: {len(test_rf)}")
+features = train_rf.columns.drop('No. of obs')
+print(f"RF features: {features.tolist()}")
 
 
-# In[40]:
+# In[16]:
 
 
 # Save RF format data
 train_rf.to_csv(output_dir / 'rf_data_train.csv', index=False)
-val_rf.to_csv(output_dir / 'rf_data_val.csv', index=False)
+test_rf.to_csv(output_dir / 'rf_data_test.csv', index=False)
 
 print(f"\nRF format data saved to {output_dir}")
 

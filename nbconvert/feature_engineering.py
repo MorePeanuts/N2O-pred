@@ -26,16 +26,16 @@ data_dir = Path('../datasets')
 
 with open(data_dir / 'sequences_obs_step_train.pkl', 'rb') as f:
     train_obs = pickle.load(f)
-with open(data_dir / 'sequences_obs_step_val.pkl', 'rb') as f:
-    val_obs = pickle.load(f)
+with open(data_dir / 'sequences_obs_step_test.pkl', 'rb') as f:
+    test_obs = pickle.load(f)
 
 with open(data_dir / 'sequences_daily_step_train.pkl', 'rb') as f:
     train_daily = pickle.load(f)
-with open(data_dir / 'sequences_daily_step_val.pkl', 'rb') as f:
-    val_daily = pickle.load(f)
+with open(data_dir / 'sequences_daily_step_test.pkl', 'rb') as f:
+    test_daily = pickle.load(f)
 
-print(f"ObsStep - Train: {len(train_obs)}, Val: {len(val_obs)}")
-print(f"DailyStep - Train: {len(train_daily)}, Val: {len(val_daily)}")
+print(f"ObsStep - Train: {len(train_obs)}, Val: {len(test_obs)}")
+print(f"DailyStep - Train: {len(train_daily)}, Val: {len(test_daily)}")
 
 
 # ## 2. Categorical Feature Encoding
@@ -176,8 +176,14 @@ train_dynamic_daily_t[:, 1] = log1p_transform(train_dynamic_daily[:, 1])
 scalers['dynamic_numeric_daily'] = StandardScaler()
 scalers['dynamic_numeric_daily'].fit(train_dynamic_daily_t)
 
-# DailyStep fertilization features
-train_fert_daily_t = log1p_transform(train_fert_daily)
+# DailyStep fertilization features (Split N amount, ferdur)
+# For ferdur: need to handle -1 specially (indicates no fertilization yet)
+train_fert_daily_t = train_fert_daily.copy()
+# Split N amount (column 0): log1p transform
+train_fert_daily_t[:, 0] = log1p_transform(train_fert_daily[:, 0])
+# ferdur (column 1): log1p only for non-negative values, keep -1 as is
+mask_fert = train_fert_daily[:, 1] >= 0
+train_fert_daily_t[mask_fert, 1] = log1p_transform(train_fert_daily[mask_fert, 1])
 scalers['fertilization_numeric_daily'] = StandardScaler()
 scalers['fertilization_numeric_daily'].fit(train_fert_daily_t)
 
@@ -200,7 +206,7 @@ scalers['static_numeric_obs'].transform(seq['static_numeric'][None, :]).flatten(
 
 # ## 4. Apply to RNN dataset
 
-# In[ ]:
+# In[11]:
 
 
 def transform_obs_sequences(seqs):
@@ -231,8 +237,8 @@ def transform_obs_sequences(seqs):
 
 print("Transforming ObsStep...")
 train_obs_t = transform_obs_sequences(train_obs)
-val_obs_t = transform_obs_sequences(val_obs)
-print(f"Done: {len(train_obs_t)} train, {len(val_obs_t)} val")
+test_obs_t = transform_obs_sequences(test_obs)
+print(f"Done: {len(train_obs_t)} train, {len(test_obs_t)} test")
 
 
 # In[12]:
@@ -241,7 +247,7 @@ print(f"Done: {len(train_obs_t)} train, {len(val_obs_t)} val")
 train_obs_t[0]
 
 
-# In[ ]:
+# In[13]:
 
 
 def transform_daily_sequences(seqs):
@@ -259,7 +265,12 @@ def transform_daily_sequences(seqs):
         dyn[:, 1] = log1p_transform(dyn[:, 1])
         t_seq['dynamic_numeric'] = scalers['dynamic_numeric_daily'].transform(dyn).astype(np.float32)
 
-        fert = log1p_transform(seq['fertilization_numeric'])
+        fert = seq['fertilization_numeric'].copy()
+        # Split N amount (column 0): log1p transform
+        fert[:, 0] = log1p_transform(fert[:, 0])
+        # ferdur (column 1): log1p only for non-negative values
+        mask_fert = fert[:, 1] >= 0
+        fert[mask_fert, 1] = log1p_transform(fert[mask_fert, 1])
         t_seq['fertilization_numeric'] = scalers['fertilization_numeric_daily'].transform(fert).astype(np.float32)
 
         t_seq['fertilization_categorical_encoded'] = {
@@ -275,8 +286,8 @@ def transform_daily_sequences(seqs):
 
 print("Transforming DailyStep...")
 train_daily_t = transform_daily_sequences(train_daily)
-val_daily_t = transform_daily_sequences(val_daily)
-print(f"Done: {len(train_daily_t)} train, {len(val_daily_t)} val")
+test_daily_t = transform_daily_sequences(test_daily)
+print(f"Done: {len(train_daily_t)} train, {len(test_daily_t)} test")
 
 
 # ## 5. Save
@@ -289,12 +300,12 @@ processed_dir.mkdir(exist_ok=True)
 
 with open(processed_dir / 'sequences_obs_step_train_processed.pkl', 'wb') as f:
     pickle.dump(train_obs_t, f)
-with open(processed_dir / 'sequences_obs_step_val_processed.pkl', 'wb') as f:
-    pickle.dump(val_obs_t, f)
+with open(processed_dir / 'sequences_obs_step_test_processed.pkl', 'wb') as f:
+    pickle.dump(test_obs_t, f)
 with open(processed_dir / 'sequences_daily_step_train_processed.pkl', 'wb') as f:
     pickle.dump(train_daily_t, f)
-with open(processed_dir / 'sequences_daily_step_val_processed.pkl', 'wb') as f:
-    pickle.dump(val_daily_t, f)
+with open(processed_dir / 'sequences_daily_step_test_processed.pkl', 'wb') as f:
+    pickle.dump(test_daily_t, f)
 
 print(f"Saved to {processed_dir}")
 

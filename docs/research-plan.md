@@ -16,11 +16,12 @@
 
 - 从 `datasets/data_EUR_reordered.csv` 加载数据
 - 删除高缺失率特征：NH4+-N, NO3_-N, MN（缺失率>60%）
-- 处理 C/N 和 TN 的缺失值（33%缺失率）：序列内前向填充 + 全局中位数填充
+- 删除 C/N 特征
+- 处理 TN 的缺失值（33%缺失率）：序列内前向填充 + 全局中位数填充
 - 按 (Publication, control_group) 分组构建序列
 - 按 sowdur 升序排列每个序列
-- 统计序列长度分布，过滤过短序列（如<10步）
-- 数据划分：按序列级别随机划分为 90% 训练集，10% 验证集（记录随机种子=42）
+- 统计序列长度分布，过滤过短序列（如<8步）
+- 数据划分：按序列级别随机划分为 90% 训练集，10% 测试集（记录随机种子=42）
 
 ### 方案1数据：观测步长（ObsStep）
 
@@ -46,7 +47,7 @@
 - 通过原始 ferdur 计算施肥日期，具体而言，如果 ferdur = -1，则表示还没有施肥，如果ferdur>= 0，则可以计算出上一次施肥的具体天数（RNN中的第几步）：`fertilization_day = sowdur - ferdur`
 - Split N amount：只在施肥日>0，其他日=0（意义变为"当天施肥量"）
 - fertilization_class, appl_class：前向填充（保持上次施肥类型和方式）
-- 移除 ferdur, sowdur：不再需要时间间隔特征（由RNN步长隐式表达）
+- 移除 sowdur, ferdur
 
 **分类特征**：
 
@@ -62,6 +63,7 @@
 
 - 将每个时间点作为独立样本（展平所有序列）
 - 特征：所有静态特征 + 当前时间步的动态特征
+- 移除时间间隔相关特征：sowdur, 但是需要保留 ferdur
 - 保存为 `datasets/rf_data_train.csv` 和 `val.csv`
 
 ## 2. 特征工程和归一化
@@ -86,11 +88,11 @@
 **零膨胀和长尾分布特征**：
 
 - Prec, Split N amount: log(x+1) 转换 + StandardScaler
-- ferdur, sowdur: log(x+1) 转换 + StandardScaler（仅方案1）
+- ferdur, sowdur: log(x+1) 转换 + StandardScaler（如果有）
 
 **其他数值特征**：
 
-- 静态特征（Clay, CEC, BD, pH, SOC, TN, C/N）: StandardScaler
+- 静态特征（Clay, CEC, BD, pH, SOC, TN）: StandardScaler
 - 动态特征（Temp, ST, WFPS）: StandardScaler
 - 时间间隔（time_delta）: StandardScaler（仅方案1）
 
@@ -132,7 +134,7 @@ class N2OPredictorRNN(nn.Module):
 
 ## 4. 数据加载器
 
-**目标文件**: `src/n2o_pred/dataset.py`
+**目标文件**: `src/n2o_pred/data.py`
 
 - `SequenceDataset_ObsStep`：方案1的 Dataset，处理变长序列
 - `SequenceDataset_DailyStep`：方案2的 Dataset，包含 observed_mask，也要处理变长序列

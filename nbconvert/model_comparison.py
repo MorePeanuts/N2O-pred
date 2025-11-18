@@ -11,7 +11,7 @@
 # 
 # - Scheme 3 (RF-Baseline): Random Forest baseline
 
-# In[1]:
+# In[ ]:
 
 
 import numpy as np
@@ -26,7 +26,7 @@ import json
 # 
 # Specify the output directories for the three models
 
-# In[10]:
+# In[ ]:
 
 
 # Specify the model output directory (needs to be modified according to actual training results)
@@ -60,7 +60,7 @@ else:
         rnn_daily_predictions = pickle.load(f)
 
 
-# In[11]:
+# In[ ]:
 
 
 rf_predictions
@@ -68,7 +68,7 @@ rf_predictions
 
 # ## 2. Evaluation Metrics Comparison
 
-# In[12]:
+# In[ ]:
 
 
 metrics_data = []
@@ -136,7 +136,7 @@ print(f'\nThe table has been saved to: {comparison_dir / "metrics_comparison.csv
 # 
 # Randomly sample sequences from the validation set and compare the prediction performance of the three models.
 
-# In[13]:
+# In[ ]:
 
 
 # Randomly sample sequences for visualization
@@ -216,7 +216,7 @@ print(f'Sequence comparison plot has been saved to: {fig_dir}')
 # 
 # Analyze the error distribution and prediction performance of different models
 
-# In[16]:
+# In[ ]:
 
 
 # Calculate the error for all validation set samples
@@ -307,7 +307,7 @@ plt.show()
 print(f'Error analysis plot has been saved to: {fig_dir / "error_analysis.png"}')
 
 
-# In[15]:
+# In[ ]:
 
 
 report_path = Path('../docs/models-comparation.md')

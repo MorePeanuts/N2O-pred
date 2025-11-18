@@ -46,7 +46,7 @@ data_dir = Path('../datasets/processed')
 
 with open(data_dir / 'sequences_obs_step_train_processed.pkl', 'rb') as f:
     train_sequences = pickle.load(f)
-with open(data_dir / 'sequences_obs_step_val_processed.pkl', 'rb') as f:
+with open(data_dir / 'sequences_obs_step_test_processed.pkl', 'rb') as f:
     val_sequences = pickle.load(f)
 
 # Load scaler for inverse transformation
@@ -414,14 +414,13 @@ print(f'{"=" * 60}')
 # In[ ]:
 
 
-print('Computing SHAP values for RNN model...')
-print('Note: For RNN models, SHAP analysis is computed on flattened time-step features')
+print('Computing SHAP values for RNN-ObsStep model...')
+print('Note: For RNN models, SHAP analysis is computed on time-averaged features')
+print('This analysis uses a simplified approach for speed.')
 
-# For RNN, we need to analyze feature importance across time steps
-# We'll use GradientExplainer which works with PyTorch models
-
-# Sample a subset of validation data for SHAP
-sample_size = min(100, len(val_sequences))
+# Sample a subset of validation data for SHAP (use smaller sample for speed)
+sample_size = min(50, len(val_sequences))
+np.random.seed(42)  # For reproducibility
 val_sample_indices = np.random.choice(len(val_sequences), sample_size, replace=False)
 
 # Collect sample data
@@ -505,17 +504,15 @@ n_fert_numeric = first_seq['fertilization_numeric'].shape[1]
 n_fert_cat_fert = first_seq['fertilization_categorical_encoded']['fertilization_class'].shape[1]
 n_fert_cat_appl = first_seq['fertilization_categorical_encoded']['appl_class'].shape[1]
 
-# Static features
-static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN', 'C/N'][:n_static_numeric]
-static_categorical_names = [f'crop_class_{i} (encoded)' for i in range(n_static_categorical)]
+# Static features (C/N already removed in data preprocessing)
+static_numeric_names = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN'][:n_static_numeric]
+static_categorical_names = [f'crop_class_{i}' for i in range(n_static_categorical)]
 
 # Dynamic features (averaged across time)
-dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)', 'time_delta (avg)'][
-    :n_dynamic_numeric
-]
-fert_numeric_names = [f'fert_numeric_{i} (avg)' for i in range(n_fert_numeric)]
-fert_cat_names_fert = [f'fertilization_class_{i} (avg)' for i in range(n_fert_cat_fert)]
-fert_cat_names_appl = [f'appl_class_{i} (avg)' for i in range(n_fert_cat_appl)]
+dynamic_numeric_names = ['Temp (avg)', 'Prec (avg)', 'ST (avg)', 'WFPS (avg)'][:n_dynamic_numeric]
+fert_numeric_names = ['Split N amount (avg)', 'ferdur (avg)', 'sowdur (avg)', 'time_delta (avg)'][:n_fert_numeric]
+fert_cat_names_fert = [f'fertilization_class_{i}' for i in range(n_fert_cat_fert)]
+fert_cat_names_appl = [f'appl_class_{i}' for i in range(n_fert_cat_appl)]
 
 feature_names = (
     static_numeric_names
@@ -589,16 +586,18 @@ class SimplifiedRNNPredictor(nn.Module):
 
 wrapped_model = SimplifiedRNNPredictor(model, val_sequences, val_sample_indices, device)
 
-# Use KernelExplainer for model-agnostic explanation
-print('Using KernelExplainer (this may take a few minutes)...')
-background_data = shap.sample(X_sample, min(50, len(X_sample)))
+# Use KernelExplainer with optimized settings for speed
+# Use smaller background for faster computation
+background_data = shap.sample(X_sample, min(20, len(X_sample)))
 explainer = shap.KernelExplainer(
-    lambda x: wrapped_model(torch.FloatTensor(x).to(device)).cpu().detach().numpy(), background_data
+    lambda x: wrapped_model(torch.FloatTensor(x).to(device)).cpu().detach().numpy(),
+    background_data,
+    link="identity"
 )
 
-# Compute SHAP values for a smaller sample
-shap_sample_size = min(20, len(X_sample))
-shap_values = explainer.shap_values(X_sample[:shap_sample_size])
+# Compute SHAP values for a small sample (balance speed vs accuracy)
+shap_sample_size = min(10, len(X_sample))
+shap_values = explainer.shap_values(X_sample[:shap_sample_size], nsamples=100)
 
 print(f'SHAP values computed for {shap_sample_size} samples')
 
@@ -658,24 +657,15 @@ print(shap_importance_agg)
 # Save aggregated SHAP importance
 shap_importance_agg.to_csv(output_dir / 'shap_importance_aggregated.csv', index=False)
 
-# Visualize SHAP importance (both raw and aggregated)
-fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+# Visualize only aggregated SHAP importance
+fig, ax = plt.subplots(figsize=(8, 6))
 
-# Left: Top 15 raw features
-shap_importance_raw.head(15).plot(
-    x='feature', y='shap_importance', kind='barh', ax=axes[0], color='steelblue', legend=False
-)
-axes[0].set_xlabel('Mean |SHAP value|', fontsize=11)
-axes[0].set_title('Top 15 Raw Features by SHAP Importance (RNN-ObsStep)', fontsize=12)
-axes[0].invert_yaxis()
-
-# Right: All aggregated features
 shap_importance_agg.plot(
-    x='feature', y='shap_importance', kind='barh', ax=axes[1], color='coral', legend=False
+    x='feature', y='shap_importance', kind='barh', ax=ax, color='coral', legend=False
 )
-axes[1].set_xlabel('Mean |SHAP value|', fontsize=11)
-axes[1].set_title('Aggregated SHAP Importance (RNN-ObsStep)', fontsize=12)
-axes[1].invert_yaxis()
+ax.set_xlabel('Mean |SHAP value|', fontsize=11)
+ax.set_title('SHAP Feature Importance (RNN-ObsStep)', fontsize=12)
+ax.invert_yaxis()
 
 plt.tight_layout()
 plt.savefig(fig_dir / 'shap_importance.png', dpi=150, bbox_inches='tight')
