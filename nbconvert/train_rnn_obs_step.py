@@ -64,8 +64,8 @@ print(f'Train: {len(train_sequences)}, Val: {len(val_sequences)}')
 
 BATCH_SIZE = 16
 HIDDEN_SIZE = 64
-NUM_LAYERS = 1
-DROPOUT = 0.2
+NUM_LAYERS = 2
+DROPOUT = 0.3
 RNN_TYPE = 'GRU'
 LEARNING_RATE = 0.001
 NUM_EPOCHS = 200
@@ -629,7 +629,9 @@ def aggregate_shap_importance(shap_importance_df):
 
         is_categorical = False
         for cat_feat in categorical_features:
-            if cat_feat in feat_name and ('(encoded)' in feat_name or '(avg)' in feat_name):
+            # Check if feature name starts with categorical feature name followed by underscore and digit
+            # e.g., 'crop_class_0', 'fertilization_class_1', 'appl_class_2'
+            if feat_name.startswith(cat_feat + '_') and feat_name.split('_')[-1].isdigit():
                 # This is a categorical feature, aggregate to original name
                 if cat_feat not in aggregated:
                     aggregated[cat_feat] = 0
