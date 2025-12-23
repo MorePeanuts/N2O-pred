@@ -72,13 +72,13 @@ class SequentialN2OData:
             for j, name in enumerate(NUMERIC_STATIC_FEATURES):
                 row[name] = self.numeric_static[j]
             for j, name in enumerate(NUMERIC_DYNAMIC_FEATURES):
-                row[name] = self.numeric_dynamic[j]
+                row[name] = self.numeric_dynamic[i][j]
             for j, name in enumerate(CATEGORICAL_STATIC_FEATURES):
                 row[name] = self.categorical_static[j]
             for j, name in enumerate(CATEGORICAL_DYNAMIC_FEATURES):
-                row[name] = self.categorical_dynamic[j]
-            for j, name in enumerate(LABELS):
-                row[name] = self.targets[j]
+                row[name] = self.categorical_dynamic[i][j]
+            for _, name in enumerate(LABELS):
+                row[name] = self.targets[i]
 
             rows.append(row)
 
