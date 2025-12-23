@@ -163,6 +163,12 @@ class RNNModel(nn.Module):
         """
         super().__init__()
 
+        self.num_numeric_static = num_numeric_static  # type: ignore
+        self.num_numeric_dynamic = num_numeric_dynamic  # type: ignore
+        self.hidden_size = hidden_size  # type: ignore
+        self.num_layers = num_layers  # type: ignore
+        self.rnn_type = rnn_type  # type: ignore
+
         # 静态分类特征的Embedding层
         self.static_embeddings = nn.ModuleList(
             [
@@ -250,7 +256,7 @@ class RNNModel(nn.Module):
         numeric_static_features: torch.Tensor,
         categorical_static_features: torch.Tensor,
         numeric_dynamic_features: torch.Tensor,
-        categorical_numeric_features: torch.Tensor,
+        categorical_dynamic_features: torch.Tensor,
         seq_lengths: torch.Tensor,
     ) -> torch.Tensor:
         """
@@ -258,7 +264,7 @@ class RNNModel(nn.Module):
             numeric_static_features: [batch_size, num_static_numeric]
             categorical_static_features: [batch_size, num_static_categorical]
             numeric_dynamic_features: [batch_size, max_seq_len, num_dynamic_numeric]
-            categorical_numeric_features: [batch_size, max_seq_len, num_dynamic_categorical]
+            categorical_dynamic_features: [batch_size, max_seq_len, num_dynamic_categorical]
             seq_lengths: [batch_size]
 
         Returns:
@@ -292,7 +298,7 @@ class RNNModel(nn.Module):
         # 嵌入动态分类特征
         dynamic_cat_embedded = []
         for i, embedding in enumerate(self.dynamic_embeddings):
-            dynamic_cat_embedded.append(embedding(categorical_numeric_features[:, :, i]))
+            dynamic_cat_embedded.append(embedding(categorical_dynamic_features[:, :, i]))
 
         if dynamic_cat_embedded:
             dynamic_cat_embedded = torch.stack(

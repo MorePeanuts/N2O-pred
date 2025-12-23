@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 from .evaluation import compute_regression_metrics
-from .models import RandomForestN2OPredictor, RandomForestConfig
+from .models import N2OPredictorRF, RandomForestConfig
 from .data import SequentialN2ODataset, LABELS
 from .utils import set_global_seed
 
@@ -61,6 +61,8 @@ class SimplestTrainer:
         match model_type:
             case 'rf':
                 self.train_random_forest(train_dataset, val_dataset, test_dataset, output_path)
+            case 'lstm':
+                self.train_lstm_model(train_dataset, val_dataset, test_dataset, output_path)
 
     def train_random_forest(
         self,
@@ -78,7 +80,7 @@ class SimplestTrainer:
         # TODO: RF模型训练应该更改为交叉验证
         config = RandomForestConfig()
         logger.info(f'Initialize the model with the following parameters: {config}')
-        model = RandomForestN2OPredictor(**config.to_dict())
+        model = N2OPredictorRF(**config.to_dict())
         model.fit(train_df)
         logger.info(f'Model training completed, model complexity: {model.count_parameters()}')
 
