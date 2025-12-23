@@ -2,6 +2,7 @@ from loguru import logger
 from pathlib import Path
 from datetime import datetime
 from sklearn.model_selection import train_test_split
+from .evaluation import compute_regression_metrics
 from .models import RandomForestN2OPredictor, RandomForestConfig
 from .data import SequentialN2ODataset, LABELS
 from .utils import set_global_seed
@@ -13,6 +14,7 @@ class SimplestTrainer:
 
     def simplest_training(
         self,
+        model_type='rf',
         random_seed=42,
         train_split=0.9,
         data_path=None,
@@ -56,6 +58,9 @@ class SimplestTrainer:
         test_dataset = dataset[test_indices]
 
         # TODO: train specilized model based on model type
+        match model_type:
+            case 'rf':
+                self.train_random_forest(train_dataset, val_dataset, test_dataset, output_path)
 
     def train_random_forest(
         self,
@@ -64,7 +69,6 @@ class SimplestTrainer:
         test_dataset: SequentialN2ODataset,
         output_path: Path,
     ):
-        output_path.mkdir(parents=True, exist_ok=True)
         logger.info('Expand sequence data into tabular data...')
         train_df = train_dataset.flatten_to_dataframe()
         val_df = val_dataset.flatten_to_dataframe()
@@ -88,13 +92,27 @@ class SimplestTrainer:
         val_targets = val_df[target_col].values
         test_targets = test_df[target_col].values
 
-        # TODO: 计算评测指标
+        # 计算评测指标
+        train_metrics = compute_regression_metrics(train_targets, train_preds)
+        val_metrics = compute_regression_metrics(val_targets, val_preds)
+        test_metrics = compute_regression_metrics(test_targets, test_preds)
+        logger.info(
+            f'Training set - R2: {train_metrics["R2"]:.4f}, RMSE: {train_metrics["RMSE"]:.4f}'
+        )
+        logger.info(
+            f'Validation set - R2: {val_metrics["R2"]:.4f}, RMSE: {val_metrics["RMSE"]:.4f}'
+        )
+        logger.info(f'Test set - R2: {test_metrics["R2"]:.4f}, RMSE: {test_metrics["RMSE"]:.4f}')
 
         # 保存模型、预测结果、评测结果
         model_path = output_path / 'random_forest_n2o_predictor.pkl'
         model.save(model_path)
         logger.info(f'Random forest N2O predictor has been saved to {model_path}')
         # TODO: 预测结果和评测结果保存
+
+        # 获取特征重要性
+        feature_importances = model.get_feature_importances()
+        logger.info(f'Feature importances: {feature_importances}')
 
     def train_lstm_model(
         self,
