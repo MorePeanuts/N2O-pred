@@ -1,5 +1,5 @@
 """
-Data processing module
+Data processing script
 """
 
 import pickle
@@ -8,31 +8,14 @@ import pandas as pd
 from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
 from loguru import logger
-
-
-# 定义字段分组
-NUMERIC_STATIC_FEATURES = ['Clay', 'CEC', 'BD', 'pH', 'SOC', 'TN']
-# 完整的动态数值特征列表（用于序列数据存储）
-NUMERIC_DYNAMIC_FEATURES = [
-    'Temp',
-    'Prec',
-    'ST',
-    'WFPS',
-    'Split N amount',
-    'ferdur',
-    'Total N amount',
-]
-CATEGORICAL_STATIC_FEATURES = ['crop_class']
-CATEGORICAL_DYNAMIC_FEATURES = ['fertilization_class', 'appl_class']
-GROUP_VARIABLES = ['No. of obs', 'Publication', 'control_group', 'sowdur']
-DROP_VARIABLES = ['NH4+-N', 'NO3_-N', 'MN', 'C/N']
-LABELS = ['Daily fluxes']
-
-# 模型专用的特征列表
-# RNN模型专用：使用前6个特征（不包括Total N amount）
-NUMERIC_DYNAMIC_FEATURES_RNN = ['Temp', 'Prec', 'ST', 'WFPS', 'Split N amount', 'ferdur']
-# RF模型专用：去掉Split N amount和ferdur，使用Total N amount
-NUMERIC_DYNAMIC_FEATURES_RF = ['Temp', 'Prec', 'ST', 'WFPS', 'Total N amount']
+from n2o_pred.data import (
+    NUMERIC_DYNAMIC_FEATURES,
+    NUMERIC_STATIC_FEATURES,
+    CATEGORICAL_DYNAMIC_FEATURES,
+    CATEGORICAL_STATIC_FEATURES,
+    DROP_VARIABLES,
+    LABELS,
+)
 
 
 def preprocessing_data(raw_data_path: Path, output_path: Path, encoders_path: Path):
