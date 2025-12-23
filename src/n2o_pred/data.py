@@ -59,6 +59,31 @@ class SequentialN2OData:
             targets=sequence['targets'],
         )
 
+    def to_pd_rows(self):
+        rows = []
+        for i in range(self.seq_length):
+            row = {
+                'No. of obs': self.no_of_obs[i],
+                'Publication': self.seq_id[0],
+                'control_group': self.seq_id[1],
+                'sowdur': self.sowdurs[i],
+            }
+
+            for j, name in enumerate(NUMERIC_STATIC_FEATURES):
+                row[name] = self.numeric_static[j]
+            for j, name in enumerate(NUMERIC_DYNAMIC_FEATURES):
+                row[name] = self.numeric_dynamic[j]
+            for j, name in enumerate(CATEGORICAL_STATIC_FEATURES):
+                row[name] = self.categorical_static[j]
+            for j, name in enumerate(CATEGORICAL_DYNAMIC_FEATURES):
+                row[name] = self.categorical_dynamic[j]
+            for j, name in enumerate(LABELS):
+                row[name] = self.targets[j]
+
+            rows.append(row)
+
+        return rows
+
 
 class SequentialN2ODataset(Dataset):
     def __init__(
@@ -84,3 +109,12 @@ class SequentialN2ODataset(Dataset):
             sub_sequences = [self.sequences[i] for i in idx]
             return SequentialN2ODataset(sequences=sub_sequences)
         return self.sequences[idx]
+
+    def flatten_to_dataframe(self) -> pd.DataFrame:
+        rows = []
+
+        for seq_data in self.sequences:
+            row_data = seq_data.to_pd_rows()
+            rows.extend(row_data)
+
+        return pd.DataFrame(rows)
