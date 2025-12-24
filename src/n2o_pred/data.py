@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # 定义字段分组
@@ -44,18 +44,21 @@ class SequentialN2OData:
     categorical_static: pd.Series
     categorical_dynamic: pd.DataFrame
     targets: pd.DataFrame
+    mask: list[bool] | None = field(default=None, init=False)
 
     @classmethod
     def from_dict(cls, sequence: dict):
+        sowdurs = list(int(dur) for dur in sequence['sowdurs'])
         return cls(
             seq_id=tuple(sequence['seq_id']),
             seq_length=sequence['seq_length'],
             no_of_obs=list(int(obs) for obs in sequence['No. of obs']),
-            sowdurs=list(int(dur) for dur in sequence['sowdurs']),
+            sowdurs=sowdurs,
             numeric_static=pd.Series(sequence['numeric_static'], index=NUMERIC_STATIC_FEATURES),
             numeric_dynamic=pd.DataFrame(
                 sequence['numeric_dynamic'],
                 columns=NUMERIC_DYNAMIC_FEATURES,  # type: ignore
+                index=sowdurs,  # type: ignore
             ),
             categorical_static=pd.Series(
                 sequence['categorical_static'], index=CATEGORICAL_STATIC_FEATURES
@@ -63,8 +66,9 @@ class SequentialN2OData:
             categorical_dynamic=pd.DataFrame(
                 sequence['categorical_dynamic'],
                 columns=CATEGORICAL_DYNAMIC_FEATURES,  # type: ignore
+                index=sowdurs,  # type: ignore
             ),
-            targets=pd.DataFrame(sequence['targets'], columns=LABELS),  # type: ignore
+            targets=pd.DataFrame(sequence['targets'], columns=LABELS, index=sowdurs),  # type: ignore
         )
 
     def to_dict(self):
@@ -105,6 +109,176 @@ class SequentialN2OData:
 
         return rows
 
+    def expand_to_daily_sequence(self):
+        obs_map = {self.sowdurs[i]: i for i in range(self.seq_length)}
+        start_day = self.sowdurs[0]
+        end_day = self.sowdurs[-1]
+        no_of_obs = pd.Series(self.no_of_obs, index=self.sowdurs)
+        self.seq_length = end_day - start_day + 1
+        self.mask = list(True if i in obs_map else False for i in range(start_day, end_day + 1))
+        self.sowdurs = list(range(start_day, end_day + 1))
+
+        # 先将插值点全部设为缺失值
+        # BUG:部分序列中，sowdurs存在重复，也就是同一天多个观测记录，见@debug/find_all_depulicate_sowdurs.py
+        self.numeric_dynamic = self.numeric_dynamic.reindex(self.sowdurs)
+        self.categorical_dynamic = self.categorical_dynamic.reindex(self.sowdurs)
+        self.targets = self.targets.reindex(self.sowdurs)
+        no_of_obs = no_of_obs.reindex(self.sowdurs)
+
+        # 对不同的列进行不同的插值操作
+        self.no_of_obs = no_of_obs.fillna(-1).astype(int).tolist()
+        self.categorical_dynamic = self.categorical_dynamic.ffill().bfill().astype(int)
+        self.targets = self.targets.interpolate().ffill().bfill()
+        self.numeric_dynamic['Prec'] = self.numeric_dynamic['Prec'].fillna(0)
+        self.numeric_dynamic[['Temp', 'ST', 'WFPS']] = (
+            self.numeric_dynamic[['Temp', 'ST', 'WFPS']].interpolate().ffill().bfill()
+        )
+        self.numeric_dynamic[['Split N amount', 'Total N amount']] = (
+            self.numeric_dynamic[['Split N amount', 'Total N amount']].ffill().bfill()
+        )
+
+        # 特殊处理：前向填充+1
+        # BUG:逻辑错误
+        group_ids = self.numeric_dynamic['ferdur'].notnull().cumsum()
+        incremental = self.numeric_dynamic['ferdur'].groupby(group_ids).cumcount()
+        self.numeric_dynamic['ferdur'] = self.numeric_dynamic['ferdur'] + incremental
+
+    def __repr__(self):
+        def _fmt_list(lst, max_len=6):
+            """辅助函数：格式化列表，过长则截断显示"""
+            if lst is None:
+                return 'None'
+            n = len(lst)
+            if n == 0:
+                return '[]'
+            if n <= max_len:
+                return str(lst)
+            return (
+                f'[{", ".join(map(str, lst[:3]))}, ..., {", ".join(map(str, lst[-3:]))}] (len={n})'
+            )
+
+        def _fmt_df(df):
+            """辅助函数：格式化DataFrame信息"""
+            if df is None:
+                return 'None'
+            return f'Shape={df.shape}, Cols={list(df.columns)}'
+
+        def _fmt_series(s):
+            """辅助函数：格式化Series信息"""
+            if s is None:
+                return 'None'
+            # 转换成字典形式显示的更紧凑，如果太长只显示Index
+            d = s.to_dict()
+            if len(d) > 5:
+                return f'Shape={s.shape}, Index={list(s.index)}'
+            return str(d)
+
+        # 计算 mask 中 True 的比例（如果有的话）
+        mask_info = 'None'
+        if self.mask is not None:
+            valid_count = sum(self.mask)
+            total = len(self.mask)
+            mask_info = f'{_fmt_list(self.mask)} (True Ratio: {valid_count}/{total})'
+
+        # 构建输出字符串
+        repr_str = [
+            f'<SequentialN2OData | ID: {self.seq_id} | Length: {self.seq_length}>',
+            '  [Metadata]',
+            f'    - sowdurs:     {_fmt_list(self.sowdurs)}',
+            f'    - no_of_obs:   {_fmt_list(self.no_of_obs)}',
+            f'    - mask:        {mask_info}',
+            '',
+            '  [Static Features] (Invariant)',
+            f'    - Numeric:     {_fmt_series(self.numeric_static)}',
+            f'    - Categorical: {_fmt_series(self.categorical_static)}',
+            '',
+            '  [Dynamic Features] (Time Series)',
+            f'    - Numeric:     {_fmt_df(self.numeric_dynamic)}',
+            f'    - Categorical: {_fmt_df(self.categorical_dynamic)}',
+            '',
+            '  [Targets]',
+            f'    - Data:        {_fmt_df(self.targets)}',
+            '-' * 60,  # 分割线
+        ]
+
+        return '\n'.join(repr_str)
+
+    def print(self, file=None):
+        def _indent(text, prefix='    '):
+            """给多行文本添加缩进，保持视觉层级"""
+            if text is None:
+                return '    None'
+            return '\n'.join(prefix + line for line in str(text).splitlines())
+
+        # 使用 option_context 强制显示所有行列，不折叠
+        with pd.option_context(
+            'display.max_rows',
+            None,
+            'display.max_columns',
+            None,
+            'display.width',
+            1000,
+            'display.precision',
+            4,
+        ):  # 您可以调整精度
+            # 1. 基础元数据
+            header = f'<SequentialN2OData | ID: {self.seq_id} | Length: {self.seq_length}>'
+
+            # 2. 列表数据 (直接显示全部)
+            meta_section = [
+                '  [Metadata Lists]',
+                f'    - sowdurs ({len(self.sowdurs)}):',
+                f'{_indent(self.sowdurs)}',
+                '',
+                f'    - no_of_obs ({len(self.no_of_obs)}):',
+                f'{_indent(self.no_of_obs)}',
+                '',
+                f'    - mask ({len(self.mask) if self.mask else 0}):',
+                f'{_indent(self.mask)}',
+            ]
+
+            # 3. 静态特征 (Series)
+            static_section = [
+                '  [Static Features]',
+                '    - Numeric:',
+                f'{_indent(self.numeric_static)}',
+                '',
+                '    - Categorical:',
+                f'{_indent(self.categorical_static)}',
+            ]
+
+            # 4. 动态特征 (DataFrame - 全量)
+            dynamic_section = [
+                '  [Dynamic Features]',
+                '    - Numeric (Full DataFrame):',
+                f'{_indent(self.numeric_dynamic)}',
+                '',
+                '    - Categorical (Full DataFrame):',
+                f'{_indent(self.categorical_dynamic)}',
+            ]
+
+            # 5. 目标变量 (DataFrame - 全量)
+            target_section = [
+                '  [Targets]',
+                '    - Data (Full DataFrame):',
+                f'{_indent(self.targets)}',
+            ]
+
+            # 组合所有部分
+            full_repr = (
+                [header, '']
+                + meta_section
+                + ['']
+                + static_section
+                + ['']
+                + dynamic_section
+                + ['']
+                + target_section
+                + ['-' * 80]
+            )
+
+            print('\n'.join(full_repr), file=file)
+
 
 class SequentialN2ODataset(Dataset):
     def __init__(
@@ -121,9 +295,13 @@ class SequentialN2ODataset(Dataset):
                 sequences = pickle.load(f)
                 self.sequences = [SequentialN2OData.from_dict(seq_data) for seq_data in sequences]
         else:
-            raise RuntimeError(
+            data_path = Path(__file__).parents[2] / 'datasets/data_EUR_processed.pkl'
+            assert data_path.exists(), (
                 'At least one of the parameters data_path and sequences must not be None.'
             )
+            with data_path.open('rb') as f:
+                sequences = pickle.load(f)
+                self.sequences = [SequentialN2OData.from_dict(seq_data) for seq_data in sequences]
 
         if encoders_path is None:
             encoders_path = Path(__file__).parents[2] / 'datasets/encoders.pkl'
