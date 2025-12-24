@@ -74,7 +74,7 @@ def preprocessing_data(raw_data_path: Path, output_path: Path, encoders_path: Pa
             'numeric_dynamic': group[NUMERIC_DYNAMIC_FEATURES].values.tolist(),
             'categorical_static': group[CATEGORICAL_STATIC_FEATURES].iloc[0].values.tolist(),
             'categorical_dynamic': group[CATEGORICAL_DYNAMIC_FEATURES].values.tolist(),
-            'targets': group[LABELS].values.flatten().tolist(),
+            'targets': group[LABELS].values.tolist(),
         }
         sequences.append(seq_data)
 
