@@ -62,6 +62,7 @@ class SimplestTrainer:
             case 'rf':
                 self.train_random_forest(train_dataset, val_dataset, test_dataset, output_path)
             case 'lstm':
+                # TODO: feature engineering before training
                 self.train_lstm_model(train_dataset, val_dataset, test_dataset, output_path)
 
     def train_random_forest(
@@ -77,7 +78,6 @@ class SimplestTrainer:
         test_df = test_dataset.flatten_to_dataframe()
 
         # 初始化随机森林模型，并在训练集上训练
-        # TODO: RF模型训练应该更改为交叉验证
         config = RandomForestConfig()
         logger.info(f'Initialize the model with the following parameters: {config}')
         model = N2OPredictorRF(**config.to_dict())
@@ -123,4 +123,4 @@ class SimplestTrainer:
         test_dataset: SequentialN2ODataset,
         output_path: Path,
     ):
-        pass
+        logger.info('Build data loader...')

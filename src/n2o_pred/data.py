@@ -1,3 +1,4 @@
+import copy
 import pickle
 import torch
 import numpy as np
@@ -311,6 +312,12 @@ class SequentialN2OData:
 
 
 class SequentialN2ODataset(Dataset):
+    """
+    This class is used to read data from local dataset files and provides a basic universal interface,
+     which can be converted into a DataFrame format for training random forest models, or into another
+     Dataset class for training RNN models.
+    """
+
     def __init__(
         self,
         data_path: Path | None = None,
@@ -342,11 +349,11 @@ class SequentialN2ODataset(Dataset):
     def __len__(self) -> int:
         return len(self.sequences)
 
-    def __getitem__(self, idx):  # type: ignore
-        if isinstance(idx, (list, np.ndarray)):
-            sub_sequences = [self.sequences[i] for i in idx]
+    def __getitem__(self, index):
+        if isinstance(index, (list, np.ndarray)):
+            sub_sequences = [self.sequences[i] for i in index]
             return SequentialN2ODataset(sequences=sub_sequences)
-        return self.sequences[idx]
+        return self.sequences[index]
 
     def flatten_to_dataframe(self) -> pd.DataFrame:
         rows = []
@@ -370,10 +377,29 @@ class SequentialN2ODataset(Dataset):
         return len(NUMERIC_DYNAMIC_FEATURES_RNN)
 
 
-# TODO:为N2O模型实现数据集，考虑特征工程的位置
 class N2ODatasetForLSTM(Dataset):
-    def __init__(self, seq_dataset, train_set: bool, scalers: dict | None = None):
-        pass
+    """
+    This class is an adapter for the SequentialN2ODataset, providing methods and attributes for using
+     this dataset in RNN model training, such as interpolating raw sequence data into daily-step
+     sequence data and offering masks.
+    """
+
+    def __init__(self, seq_dataset: SequentialN2ODataset):
+        self.sequences = copy.deepcopy(seq_dataset.sequences)
+        self.encoders = seq_dataset.encoders
+        self.original_seqs = seq_dataset.sequences
+        self._expand_to_daily_sequences()
 
     def _expand_to_daily_sequences(self):
-        pass
+        for seq_data in self.sequences:
+            seq_data.expand_to_daily_sequence()
+
+    def __getitem__(self, index):
+        return self.sequences[index]
+
+    @staticmethod
+    def collate_fn(batch: list[SequentialN2OData]) -> dict[str, torch.Tensor]:
+        """
+        Batch processing of variable-length sequences.
+        """
+        raise NotImplementedError()

@@ -40,6 +40,7 @@ class RandomForestConfig:
         }
 
 
+# TODO:为RNN模型实现一个Config类
 @dataclass
 class RNNConfig: ...
 
@@ -163,11 +164,11 @@ class RNNModel(nn.Module):
         """
         super().__init__()
 
-        self.num_numeric_static = num_numeric_static  # type: ignore
-        self.num_numeric_dynamic = num_numeric_dynamic  # type: ignore
-        self.hidden_size = hidden_size  # type: ignore
-        self.num_layers = num_layers  # type: ignore
-        self.rnn_type = rnn_type  # type: ignore
+        self.num_numeric_static = num_numeric_static
+        self.num_numeric_dynamic = num_numeric_dynamic
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.rnn_type = rnn_type
 
         # 静态分类特征的Embedding层
         self.static_embeddings = nn.ModuleList(
@@ -277,6 +278,7 @@ class RNNModel(nn.Module):
 
         # 1. 处理静态特征
         # 嵌入静态分类特征
+        # WARNING: RNN的前向传播由AI生成，需要人工检查
         static_cat_embedded = []
         for i, embedding in enumerate(self.static_embeddings):
             static_cat_embedded.append(embedding(categorical_static_features[:, i]))
@@ -340,6 +342,7 @@ class RNNModel(nn.Module):
         return predictions
 
 
+# TODO:包裹N2O模型，与RF预测器统一接口
 class N2OPredictorRNN:
     def __init__(
         self,
