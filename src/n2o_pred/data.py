@@ -110,6 +110,14 @@ class SequentialN2OData:
         return rows
 
     def expand_to_daily_sequence(self):
+        """
+        Through interpolation, the interval between sample points in the sequence
+         is adjusted to 1 day, and the mask field is used to distinguish between real
+         sample points and interpolated sample points.
+
+        [WARNING] This function performs an in-place operation; if you need to preserve
+         the original sequence data, you should make a copy first.
+        """
         obs_map = {self.sowdurs[i]: i for i in range(self.seq_length)}
         start_day = self.sowdurs[0]
         end_day = self.sowdurs[-1]
@@ -119,7 +127,6 @@ class SequentialN2OData:
         self.sowdurs = list(range(start_day, end_day + 1))
 
         # 先将插值点全部设为缺失值
-        # BUG:部分序列中，sowdurs存在重复，也就是同一天多个观测记录，见@debug/find_all_depulicate_sowdurs.py
         self.numeric_dynamic = self.numeric_dynamic.reindex(self.sowdurs)
         self.categorical_dynamic = self.categorical_dynamic.reindex(self.sowdurs)
         self.targets = self.targets.reindex(self.sowdurs)
@@ -133,15 +140,38 @@ class SequentialN2OData:
         self.numeric_dynamic[['Temp', 'ST', 'WFPS']] = (
             self.numeric_dynamic[['Temp', 'ST', 'WFPS']].interpolate().ffill().bfill()
         )
-        self.numeric_dynamic[['Split N amount', 'Total N amount']] = (
-            self.numeric_dynamic[['Split N amount', 'Total N amount']].ffill().bfill()
+
+        # 处理距离上次施肥的天数
+        pos_ferdur = self.numeric_dynamic['ferdur'].mask(
+            self.numeric_dynamic['ferdur'] <= 0, np.nan
+        )
+        fert_date = (self.numeric_dynamic.index - pos_ferdur).dropna().astype(int).unique().tolist()
+        min_fert_date = min(fert_date) if len(fert_date) > 0 else 0
+        last_fert_sowdur = pd.Series(np.nan, index=np.arange(min_fert_date, end_day + 1, dtype=int))
+        last_fert_sowdur.loc[fert_date] = fert_date
+        last_fert_sowdur = last_fert_sowdur.ffill().reindex(self.sowdurs)
+        # last_fert_sowdur = last_fert_sowdur.fillna(last_fert_sowdur.index.to_series())
+        last_fert_sowdur = last_fert_sowdur.fillna(-1)
+        # self.numeric_dynamic['ferdur'] = (self.numeric_dynamic.index - last_fert_sowdur).astype(int)
+        self.numeric_dynamic['ferdur'] = pd.Series(
+            np.where(
+                last_fert_sowdur == -1,
+                0,
+                (self.numeric_dynamic.index - last_fert_sowdur).astype(int),
+            ),
+            index=self.sowdurs,
         )
 
-        # 特殊处理：前向填充+1
-        # BUG:逻辑错误
-        group_ids = self.numeric_dynamic['ferdur'].notnull().cumsum()
-        incremental = self.numeric_dynamic['ferdur'].groupby(group_ids).cumcount()
-        self.numeric_dynamic['ferdur'] = self.numeric_dynamic['ferdur'] + incremental
+        # 根据插值后的ferdur处理施肥量
+        self.numeric_dynamic[['Split N amount', 'Total N amount']] = (
+            self.numeric_dynamic[['Split N amount', 'Total N amount']]
+            .fillna(
+                self.numeric_dynamic[['Split N amount', 'Total N amount']]
+                .groupby(last_fert_sowdur)
+                .transform('first')
+            )
+            .fillna(0)
+        )
 
     def __repr__(self):
         def _fmt_list(lst, max_len=6):

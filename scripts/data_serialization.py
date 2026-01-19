@@ -1,5 +1,7 @@
 """
-Data processing script
+Data processing script.
+
+Convert the original tabular dataset into a sequential dataset and save it in pkl format.
 """
 
 import pickle
@@ -64,6 +66,8 @@ def preprocessing_data(raw_data_path: Path, output_path: Path, encoders_path: Pa
         if group['TN'].isna().any():
             mean_tn = df['TN'].mean()
             group['TN'] = group['TN'].fillna(mean_tn if not pd.isna(mean_tn) else 1.0)
+        # 对sowdurs进行去重，保留靠后的行
+        group = group.drop_duplicates(subset=['sowdur'], keep='last')
 
         seq_data = {
             'seq_id': [int(publication), int(control_group)],
