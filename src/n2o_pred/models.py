@@ -1,10 +1,12 @@
+import json
 import pickle
 import torch
 import pandas as pd
 import numpy as np
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from typing import Literal
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from .data import (
@@ -14,6 +16,7 @@ from .data import (
     CATEGORICAL_DYNAMIC_FEATURES,
     LABELS,
     NUMERIC_DYNAMIC_FEATURES_RNN,
+    N2ODatasetForLSTM,
 )
 
 
@@ -40,9 +43,20 @@ class RandomForestConfig:
         }
 
 
-# TODO:为RNN模型实现一个Config类
 @dataclass
-class RNNConfig: ...
+class RNNConfig:
+    embedding_dim: int
+    hidden_size: int
+    num_layers: int
+    dropout: float
+    mlp_hidden_dim: int
+    rnn_type: Literal['GRU', 'LSTM']
+
+    @classmethod
+    def from_json(cls, path: Path):
+        with path.open() as f:
+            conf = json.load(f)
+        return cls(**conf)
 
 
 class N2OPredictorRF:
@@ -342,23 +356,57 @@ class RNNModel(nn.Module):
         return predictions
 
 
-# TODO:包裹N2O模型，与RF预测器统一接口
 class N2OPredictorRNN:
     def __init__(
         self,
+        num_numeric_static: int,
+        num_numeric_dynamic: int,
+        categorical_static_cardinalities: list[int],
+        categorical_dynamic_cardinalities: list[int],
+        model_config: RNNConfig | None = None,
+        device: str = 'cpu',
+        **kwargs,
     ):
         """
         Args:
 
         """
-        super().__init__()
+        self.device = device
+        self.model = RNNModel(
+            num_numeric_static,
+            num_numeric_dynamic,
+            categorical_static_cardinalities,
+            categorical_dynamic_cardinalities,
+            **asdict(model_config) if model_config else {},
+        )
+        self.model.to(self.device)
 
-    def fit(self): ...
+    def fit(self, train_set: N2ODatasetForLSTM, val_set: N2ODatasetForLSTM):
+        # TODO: RNN模型训练函数
+        pass
 
-    def predict(self): ...
+    def predict(self, inp: N2ODatasetForLSTM, batch_size=16):
+        loader = DataLoader(
+            dataset=inp,
+            batch_size=batch_size,
+            collate_fn=N2ODatasetForLSTM.collate_fn,
+        )
 
-    def save(self): ...
+        self.model.eval()
+        with torch.no_grad():
+            for batch, _ in loader:
+                predictions = self.model(**batch)
+                # TODO: 将predictions写会到SequentialN2OData中
 
-    def load(self): ...
+    def save(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.model.state_dict(), path)
 
-    def count_parameters(self): ...
+    def load(self, path: Path):
+        if path.name.endswith('best_model.pt'):
+            self.model.load_state_dict(torch.load(path, map_location='cpu')['model_state_dict'])
+        else:
+            self.model.load_state_dict(torch.load(path, map_location='cpu'))
+
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)

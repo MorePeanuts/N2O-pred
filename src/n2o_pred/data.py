@@ -3,6 +3,7 @@ import pickle
 import torch
 import numpy as np
 import pandas as pd
+from typing import Literal
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 from pathlib import Path
@@ -45,6 +46,7 @@ class SequentialN2OData:
     categorical_static: pd.Series
     categorical_dynamic: pd.DataFrame
     targets: pd.DataFrame
+    predictions: pd.DataFrame | None = field(default=None, init=False)
     mask: list[bool] | None = field(default=None, init=False)
 
     @classmethod
@@ -72,18 +74,41 @@ class SequentialN2OData:
             targets=pd.DataFrame(sequence['targets'], columns=LABELS, index=sowdurs),  # type: ignore
         )
 
-    def to_dict(self):
-        return {
-            'seq_id': list(self.seq_id),
-            'seq_length': self.seq_length,
-            'No. of obs': self.no_of_obs,
-            'sowdurs': self.sowdurs,
-            'numeric_static': self.numeric_static.tolist(),
-            'numeric_dynamic': self.numeric_dynamic.to_numpy().tolist(),
-            'categorical_static': self.categorical_static.tolist(),
-            'categorical_dynamic': self.categorical_dynamic.to_numpy().tolist(),
-            'targets': self.targets.to_numpy().tolist(),
-        }
+    def to_dict(self, format: Literal['list', 'tensor'] = 'list'):
+        match format:
+            case 'list':
+                res = {
+                    'seq_id': list(self.seq_id),
+                    'seq_length': self.seq_length,
+                    'No. of obs': self.no_of_obs,
+                    'sowdurs': self.sowdurs,
+                    'numeric_static': self.numeric_static.tolist(),
+                    'numeric_dynamic': self.numeric_dynamic.to_numpy().tolist(),
+                    'categorical_static': self.categorical_static.tolist(),
+                    'categorical_dynamic': self.categorical_dynamic.to_numpy().tolist(),
+                    'targets': self.targets.to_numpy().tolist(),
+                }
+                if self.predictions:
+                    res['predictions'] = self.predictions.to_numpy().tolist()
+                if self.mask:
+                    res['mask'] = self.mask
+                return res
+            case 'tensor':
+                res = {
+                    'seq_id': list(self.seq_id),
+                    'seq_length': self.seq_length,
+                    'No. of obs': self.no_of_obs,
+                    'sowdurs': self.sowdurs,
+                    'numeric_static': torch.from_numpy(self.numeric_static.to_numpy()),
+                    'numeric_dynamic': torch.from_numpy(self.numeric_dynamic.to_numpy()),
+                    'categorical_static': torch.from_numpy(self.categorical_static.to_numpy()),
+                    'categorical_dynamic': torch.from_numpy(self.categorical_dynamic.to_numpy()),
+                    'targets': torch.from_numpy(self.targets.to_numpy()),
+                }
+                if self.predictions:
+                    res['predictions'] = torch.from_numpy(self.predictions.to_numpy())
+                if self.mask:
+                    res['mask'] = torch.tensor(self.mask)
 
     def to_pd_rows(self):
         rows = []
@@ -365,9 +390,11 @@ class SequentialN2ODataset(Dataset):
         return pd.DataFrame(rows)
 
     def get_categorical_static_cardinalities(self):
+        # BUG: 分类变量的类别数不应取决于训练数据
         return [len(self.encoders[feature].classes_) for feature in CATEGORICAL_STATIC_FEATURES]
 
     def get_categorical_dynamic_cardinalities(self):
+        # BUG: 分类变量的类别数不应取决于训练数据
         return [len(self.encoders[feature].classes_) for feature in CATEGORICAL_DYNAMIC_FEATURES]
 
     def get_num_numeric_static(self):
@@ -398,8 +425,50 @@ class N2ODatasetForLSTM(Dataset):
         return self.sequences[index]
 
     @staticmethod
-    def collate_fn(batch: list[SequentialN2OData]) -> dict[str, torch.Tensor]:
+    def collate_fn(batch: list[SequentialN2OData]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """
         Batch processing of variable-length sequences.
+
+        The return value is consistent with the input parameters of the RNNModel's forward method.
         """
-        raise NotImplementedError()
+        max_len = max(seq.seq_length for seq in batch)
+        batch_size = len(batch)
+
+        # 获取特征维度
+        first_dict = batch[0].to_dict(format='tensor')
+        assert 'mask' in first_dict, 'No mask found in dataset. expand_to_daily_sequence first.'
+        num_numeric_static = first_dict['numeric_static'].shape[0]
+        num_numeric_dynamic = first_dict['numeric_dynamic'].shape[1]
+        num_categorical_static = first_dict['categorical_static'].shape[0]
+        num_categorical_dynamic = first_dict['categorical_dynamic'].shape[1]
+
+        # 初始化张量
+        numeric_static_features = torch.zeros(batch_size, num_numeric_static)
+        numeric_dynamic_features = torch.zeros(batch_size, max_len, num_numeric_dynamic)
+        categorical_static_features = torch.zeros(batch_size, num_categorical_static)
+        categorical_dynamic_features = torch.zeros(batch_size, max_len, num_categorical_dynamic)
+        seq_lengths = torch.zeros(batch_size)
+
+        targets = torch.zeros(batch_size, max_len)
+        mask = torch.zeros(batch_size, max_len, dtype=torch.bool)
+
+        # 填充张量
+        for i, item in enumerate(batch):
+            seq_len = item.seq_length
+            seq_lengths[i] = seq_len
+            item_dict = item.to_dict(format='tensor')
+
+            numeric_static_features[i] = item_dict['numeric_static']
+            numeric_dynamic_features[i, :seq_len] = item_dict['numeric_dynamic']
+            categorical_static_features[i] = item_dict['categorical_static']
+            categorical_dynamic_features[i, :seq_len] = item_dict['categorical_dynamic']
+            targets[i, :seq_len] = item_dict['targets'].flatten()
+            mask[i, :seq_len] = item_dict['mask']
+
+        return {
+            'numeric_static_features': numeric_static_features,
+            'categorical_static_features': categorical_static_features,
+            'numeric_dynamic_features': numeric_dynamic_features,
+            'categorical_dynamic_features': categorical_dynamic_features,
+            'seq_lengths': seq_lengths,
+        }, targets
