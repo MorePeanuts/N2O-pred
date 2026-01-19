@@ -1,5 +1,5 @@
 from n2o_pred.models import N2OPredictorRNN, RNNConfig
-from n2o_pred.data import SequentialN2ODataset
+from n2o_pred.data import SequentialN2ODataset, N2ODatasetForLSTM
 from pathlib import Path
 
 
@@ -14,3 +14,6 @@ model = N2OPredictorRNN(
     model_config=model_config,
 )
 model.load(model_dir / 'best_model.pt')
+
+n2o_dataset = N2ODatasetForLSTM(dataset)
+model.predict(n2o_dataset)

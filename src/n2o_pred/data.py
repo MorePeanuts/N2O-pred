@@ -109,6 +109,7 @@ class SequentialN2OData:
                     res['predictions'] = torch.from_numpy(self.predictions.to_numpy())
                 if self.mask:
                     res['mask'] = torch.tensor(self.mask)
+                return res
 
     def to_pd_rows(self):
         rows = []
@@ -424,6 +425,9 @@ class N2ODatasetForLSTM(Dataset):
     def __getitem__(self, index):
         return self.sequences[index]
 
+    def __len__(self) -> int:
+        return len(self.sequences)
+
     @staticmethod
     def collate_fn(batch: list[SequentialN2OData]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """
@@ -445,9 +449,13 @@ class N2ODatasetForLSTM(Dataset):
         # 初始化张量
         numeric_static_features = torch.zeros(batch_size, num_numeric_static)
         numeric_dynamic_features = torch.zeros(batch_size, max_len, num_numeric_dynamic)
-        categorical_static_features = torch.zeros(batch_size, num_categorical_static)
-        categorical_dynamic_features = torch.zeros(batch_size, max_len, num_categorical_dynamic)
-        seq_lengths = torch.zeros(batch_size)
+        categorical_static_features = torch.zeros(
+            batch_size, num_categorical_static, dtype=torch.long
+        )
+        categorical_dynamic_features = torch.zeros(
+            batch_size, max_len, num_categorical_dynamic, dtype=torch.long
+        )
+        seq_lengths = torch.zeros(batch_size, dtype=torch.long)
 
         targets = torch.zeros(batch_size, max_len)
         mask = torch.zeros(batch_size, max_len, dtype=torch.bool)

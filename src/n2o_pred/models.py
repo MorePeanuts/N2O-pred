@@ -328,6 +328,7 @@ class RNNModel(nn.Module):
             dynamic_features = numeric_dynamic_features
 
         # 投影动态特征
+        # BUG: 前向传播时出现矩阵形状不匹配的问题
         dynamic_projected = self.dynamic_projection(
             dynamic_features
         )  # [batch_size, max_seq_len, hidden_size]
