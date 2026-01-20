@@ -133,8 +133,14 @@ class SequentialN2OData:
                 row[name] = self.categorical_static.iloc[j]
             for j, name in enumerate(self.categorical_dynamic.columns):
                 row[name] = self.categorical_dynamic.iloc[i, j]
-            for j, name in enumerate(LABELS):
+            for j, name in enumerate(self.targets.columns):
                 row[name] = self.targets.iloc[i, j]
+
+            if self.predictions is not None:
+                for j, name in enumerate(self.predictions.columns):
+                    row[name] = self.predictions.iloc[i, j]
+            if self.mask is not None:
+                row['mask'] = self.mask[i]
 
             rows.append(row)
 
@@ -479,8 +485,19 @@ class N2ODatasetForLSTM(Dataset):
     def __len__(self) -> int:
         return len(self.sequences)
 
+    def save(self, path: Path):
+        rows = []
+        for seq in self.sequences:
+            row_data = seq.to_pd_rows()
+            rows.extend(row_data)
+        df = pd.DataFrame(rows)
+        df.set_index('No. of obs', inplace=True)
+        df.to_csv(path, index=True)
+
     @staticmethod
-    def collate_fn(batch: list[SequentialN2OData]) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+    def collate_fn(
+        batch: list[SequentialN2OData],
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor, list[SequentialN2OData]]:
         """
         Batch processing of variable-length sequences.
 
@@ -524,10 +541,22 @@ class N2ODatasetForLSTM(Dataset):
             targets[i, :seq_len] = item_dict['targets'].flatten()
             mask[i, :seq_len] = item_dict['mask']
 
-        return {
-            'numeric_static_features': numeric_static_features,
-            'categorical_static_features': categorical_static_features,
-            'numeric_dynamic_features': numeric_dynamic_features,
-            'categorical_dynamic_features': categorical_dynamic_features,
-            'seq_lengths': seq_lengths,
-        }, targets
+        return (
+            {
+                'numeric_static_features': numeric_static_features,
+                'categorical_static_features': categorical_static_features,
+                'numeric_dynamic_features': numeric_dynamic_features,
+                'categorical_dynamic_features': categorical_dynamic_features,
+                'seq_lengths': seq_lengths,
+            },
+            targets,
+            batch,
+        )
+
+    @staticmethod
+    def collate_predictions(batch: list[SequentialN2OData], predictions: torch.Tensor):
+        assert len(batch) == predictions.shape[0], 'batch size doesnot match'
+        for i, seq in enumerate(batch):
+            seq_length = seq.seq_length
+            pred = predictions[i, :seq_length]
+            seq.predictions = pd.DataFrame(pred.numpy(), columns=['predictions'], index=seq.sowdurs)  # type:ignore

@@ -328,7 +328,6 @@ class RNNModel(nn.Module):
             dynamic_features = numeric_dynamic_features
 
         # 投影动态特征
-        # BUG: 前向传播时出现矩阵形状不匹配的问题
         dynamic_projected = self.dynamic_projection(
             dynamic_features
         )  # [batch_size, max_seq_len, hidden_size]
@@ -395,9 +394,9 @@ class N2OPredictorRNN:
 
         self.model.eval()
         with torch.no_grad():
-            for batch, _ in loader:
-                predictions = self.model(**batch)
-                # TODO: 将predictions写会到SequentialN2OData中
+            for inp_batch, _, batch in loader:
+                predictions = self.model(**inp_batch)
+                N2ODatasetForLSTM.collate_predictions(batch, predictions)
 
     def save(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,7 @@ from n2o_pred.data import SequentialN2ODataset, N2ODatasetForLSTM, NUMERIC_DYNAM
 from pathlib import Path
 
 
-model_dir = Path(__file__).parents[1] / 'output/test_model'
+model_dir = Path(__file__).parents[1] / 'output/lstm-251120'
 model_config = RNNConfig.from_json(model_dir / 'model_config.json')
 dataset = SequentialN2ODataset(numeric_dynamic_features=NUMERIC_DYNAMIC_FEATURES_RNN)
 model = N2OPredictorRNN(
@@ -17,3 +17,4 @@ model.load(model_dir / 'best_model.pt')
 
 n2o_dataset = N2ODatasetForLSTM(dataset)
 model.predict(n2o_dataset)
+n2o_dataset.save(model_dir / 'predictions.csv')
