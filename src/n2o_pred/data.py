@@ -50,7 +50,10 @@ class SequentialN2OData:
     mask: list[bool] | None = field(default=None, init=False)
 
     @classmethod
-    def from_dict(cls, sequence: dict):
+    def from_dict(
+        cls,
+        sequence: dict,
+    ):
         sowdurs = list(int(dur) for dur in sequence['sowdurs'])
         return cls(
             seq_id=tuple(sequence['seq_id']),
@@ -64,7 +67,8 @@ class SequentialN2OData:
                 index=sowdurs,  # type: ignore
             ),
             categorical_static=pd.Series(
-                sequence['categorical_static'], index=CATEGORICAL_STATIC_FEATURES
+                sequence['categorical_static'],
+                index=CATEGORICAL_STATIC_FEATURES,
             ),
             categorical_dynamic=pd.DataFrame(
                 sequence['categorical_dynamic'],
@@ -121,13 +125,13 @@ class SequentialN2OData:
                 'sowdur': self.sowdurs[i],
             }
 
-            for j, name in enumerate(NUMERIC_STATIC_FEATURES):
+            for j, name in enumerate(self.numeric_static.index):
                 row[name] = self.numeric_static.iloc[j]
-            for j, name in enumerate(NUMERIC_DYNAMIC_FEATURES):
+            for j, name in enumerate(self.numeric_dynamic.columns):
                 row[name] = self.numeric_dynamic.iloc[i, j]
-            for j, name in enumerate(CATEGORICAL_STATIC_FEATURES):
+            for j, name in enumerate(self.categorical_static.index):
                 row[name] = self.categorical_static.iloc[j]
-            for j, name in enumerate(CATEGORICAL_DYNAMIC_FEATURES):
+            for j, name in enumerate(self.categorical_dynamic.columns):
                 row[name] = self.categorical_dynamic.iloc[i, j]
             for j, name in enumerate(LABELS):
                 row[name] = self.targets.iloc[i, j]
@@ -163,42 +167,58 @@ class SequentialN2OData:
         self.no_of_obs = no_of_obs.fillna(-1).astype(int).tolist()
         self.categorical_dynamic = self.categorical_dynamic.ffill().bfill().astype(int)
         self.targets = self.targets.interpolate().ffill().bfill()
-        self.numeric_dynamic['Prec'] = self.numeric_dynamic['Prec'].fillna(0)
-        self.numeric_dynamic[['Temp', 'ST', 'WFPS']] = (
-            self.numeric_dynamic[['Temp', 'ST', 'WFPS']].interpolate().ffill().bfill()
-        )
+        if 'Prec' in self.numeric_dynamic.columns:
+            self.numeric_dynamic['Prec'] = self.numeric_dynamic['Prec'].fillna(0)
+        if all(col in self.numeric_dynamic.columns for col in ['Temp', 'ST', 'WFPS']):
+            self.numeric_dynamic[['Temp', 'ST', 'WFPS']] = (
+                self.numeric_dynamic[['Temp', 'ST', 'WFPS']].interpolate().ffill().bfill()
+            )
 
         # 处理距离上次施肥的天数
-        pos_ferdur = self.numeric_dynamic['ferdur'].mask(
-            self.numeric_dynamic['ferdur'] <= 0, np.nan
-        )
-        fert_date = (self.numeric_dynamic.index - pos_ferdur).dropna().astype(int).unique().tolist()
-        min_fert_date = min(fert_date) if len(fert_date) > 0 else 0
-        last_fert_sowdur = pd.Series(np.nan, index=np.arange(min_fert_date, end_day + 1, dtype=int))
-        last_fert_sowdur.loc[fert_date] = fert_date
-        last_fert_sowdur = last_fert_sowdur.ffill().reindex(self.sowdurs)
-        # last_fert_sowdur = last_fert_sowdur.fillna(last_fert_sowdur.index.to_series())
-        last_fert_sowdur = last_fert_sowdur.fillna(-1)
-        # self.numeric_dynamic['ferdur'] = (self.numeric_dynamic.index - last_fert_sowdur).astype(int)
-        self.numeric_dynamic['ferdur'] = pd.Series(
-            np.where(
-                last_fert_sowdur == -1,
-                0,
-                (self.numeric_dynamic.index - last_fert_sowdur).astype(int),
-            ),
-            index=self.sowdurs,
-        )
+        if 'ferdur' in self.numeric_dynamic:
+            pos_ferdur = self.numeric_dynamic['ferdur'].mask(
+                self.numeric_dynamic['ferdur'] <= 0, np.nan
+            )
+            fert_date = (
+                (self.numeric_dynamic.index - pos_ferdur).dropna().astype(int).unique().tolist()
+            )
+            min_fert_date = min(fert_date) if len(fert_date) > 0 else 0
+            last_fert_sowdur = pd.Series(
+                np.nan, index=np.arange(min_fert_date, end_day + 1, dtype=int)
+            )
+            last_fert_sowdur.loc[fert_date] = fert_date
+            last_fert_sowdur = last_fert_sowdur.ffill().reindex(self.sowdurs)
+            last_fert_sowdur = last_fert_sowdur.fillna(-1)
+            self.numeric_dynamic['ferdur'] = pd.Series(
+                np.where(
+                    last_fert_sowdur == -1,
+                    0,
+                    (self.numeric_dynamic.index - last_fert_sowdur).astype(int),
+                ),
+                index=self.sowdurs,
+            )
 
         # 根据插值后的ferdur处理施肥量
-        self.numeric_dynamic[['Split N amount', 'Total N amount']] = (
-            self.numeric_dynamic[['Split N amount', 'Total N amount']]
-            .fillna(
-                self.numeric_dynamic[['Split N amount', 'Total N amount']]
-                .groupby(last_fert_sowdur)
-                .transform('first')
+        if 'Split N amount' in self.numeric_dynamic.columns:
+            self.numeric_dynamic[['Split N amount']] = (
+                self.numeric_dynamic[['Split N amount']]
+                .fillna(
+                    self.numeric_dynamic[['Split N amount']]
+                    .groupby(last_fert_sowdur)
+                    .transform('first')
+                )
+                .fillna(0)
             )
-            .fillna(0)
-        )
+        if 'Total N amount' in self.numeric_dynamic.columns:
+            self.numeric_dynamic[['Total N amount']] = (
+                self.numeric_dynamic[['Total N amount']]
+                .fillna(
+                    self.numeric_dynamic[['Total N amount']]
+                    .groupby(last_fert_sowdur)
+                    .transform('first')
+                )
+                .fillna(0)
+            )
 
     def __repr__(self):
         def _fmt_list(lst, max_len=6):
@@ -349,6 +369,10 @@ class SequentialN2ODataset(Dataset):
         data_path: Path | None = None,
         sequences: list[SequentialN2OData] | None = None,
         encoders_path: Path | None = None,
+        categorical_static_features=CATEGORICAL_STATIC_FEATURES,
+        categorical_dynamic_features=CATEGORICAL_DYNAMIC_FEATURES,
+        numeric_static_features=NUMERIC_STATIC_FEATURES,
+        numeric_dynamic_features=NUMERIC_DYNAMIC_FEATURES,
     ):
         if sequences:
             self.sequences = sequences
@@ -372,6 +396,13 @@ class SequentialN2ODataset(Dataset):
         with encoders_path.open('rb') as f:
             self.encoders = pickle.load(f)
 
+        self.set_dataframe_columns(
+            categorical_static_features,
+            categorical_dynamic_features,
+            numeric_static_features,
+            numeric_dynamic_features,
+        )
+
     def __len__(self) -> int:
         return len(self.sequences)
 
@@ -390,19 +421,39 @@ class SequentialN2ODataset(Dataset):
 
         return pd.DataFrame(rows)
 
+    def set_dataframe_columns(
+        self,
+        categorical_static_features,
+        categorical_dynamic_features,
+        numeric_static_features,
+        numeric_dynamic_features,
+    ):
+        self.categorical_static_features = categorical_static_features
+        self.categorical_dynamic_features = categorical_dynamic_features
+        self.numeric_static_features = numeric_static_features
+        self.numeric_dynamic_features = numeric_dynamic_features
+
+        for seq in self.sequences:
+            seq.categorical_static = seq.categorical_static[self.categorical_static_features]
+            seq.categorical_dynamic = seq.categorical_dynamic[self.categorical_dynamic_features]
+            seq.numeric_static = seq.numeric_static[self.numeric_static_features]
+            seq.numeric_dynamic = seq.numeric_dynamic[self.numeric_dynamic_features]
+
     def get_categorical_static_cardinalities(self):
-        # BUG: 分类变量的类别数不应取决于训练数据
-        return [len(self.encoders[feature].classes_) for feature in CATEGORICAL_STATIC_FEATURES]
+        return [
+            len(self.encoders[feature].classes_) for feature in self.categorical_static_features
+        ]
 
     def get_categorical_dynamic_cardinalities(self):
-        # BUG: 分类变量的类别数不应取决于训练数据
-        return [len(self.encoders[feature].classes_) for feature in CATEGORICAL_DYNAMIC_FEATURES]
+        return [
+            len(self.encoders[feature].classes_) for feature in self.categorical_dynamic_features
+        ]
 
     def get_num_numeric_static(self):
-        return len(NUMERIC_STATIC_FEATURES)
+        return len(self.numeric_static_features)
 
     def get_num_numeric_dynamic(self):
-        return len(NUMERIC_DYNAMIC_FEATURES_RNN)
+        return len(self.numeric_dynamic_features)
 
 
 class N2ODatasetForLSTM(Dataset):

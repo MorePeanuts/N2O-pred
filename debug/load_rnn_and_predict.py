@@ -1,11 +1,11 @@
 from n2o_pred.models import N2OPredictorRNN, RNNConfig
-from n2o_pred.data import SequentialN2ODataset, N2ODatasetForLSTM
+from n2o_pred.data import SequentialN2ODataset, N2ODatasetForLSTM, NUMERIC_DYNAMIC_FEATURES_RNN
 from pathlib import Path
 
 
 model_dir = Path(__file__).parents[1] / 'output/test_model'
 model_config = RNNConfig.from_json(model_dir / 'model_config.json')
-dataset = SequentialN2ODataset()
+dataset = SequentialN2ODataset(numeric_dynamic_features=NUMERIC_DYNAMIC_FEATURES_RNN)
 model = N2OPredictorRNN(
     num_numeric_static=dataset.get_num_numeric_static(),
     num_numeric_dynamic=dataset.get_num_numeric_dynamic(),
